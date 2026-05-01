@@ -19,6 +19,7 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
 
   const [formData, setFormData] = useState({
     fullName: "",
+    email: "",
     idNumber: "",
     phone: "",
     signatureName: "",
@@ -74,6 +75,7 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
       const tenantRef = doc(db, "tenants", tenantId);
       await updateDoc(tenantRef, {
         name: formData.fullName,
+        email: formData.email,
         idNumber: formData.idNumber,
         phone: formData.phone,
         signatureName: formData.signatureName,
@@ -84,6 +86,23 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
         submittedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
+
+      // 3. Trigger Email Notifications via Resend
+      try {
+        await fetch("/api/email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tenantId,
+            name: formData.fullName,
+            email: formData.email,
+            phone: formData.phone,
+          }),
+        });
+      } catch (emailErr) {
+        console.error("Failed to send email notification", emailErr);
+        // We don't fail the submission if the email fails, just log it.
+      }
 
       router.push("/lease/success");
     } catch (err: any) {
@@ -132,7 +151,7 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
           <div className="flex justify-between items-end mb-4 border-b border-black pb-2">
             <h2 className="text-xl font-medium tracking-wide uppercase">Lease Document</h2>
             <a
-              href="/lease-agreement.pdf"
+              href="/LEASE%20AGREEMENT%20updated.01.pdf"
               download="Lease_Agreement.pdf"
               className="flex items-center gap-2 text-xs font-medium border border-black px-3 py-1.5 hover:bg-black hover:text-white transition-colors"
             >
@@ -143,7 +162,7 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
 
           <div className="border border-gray-300 h-[600px] w-full bg-gray-50 relative">
             <iframe 
-              src="/lease-agreement.pdf#view=FitH" 
+              src="/LEASE%20AGREEMENT%20updated.01.pdf#view=FitH" 
               className="w-full h-full"
               title="Lease Agreement PDF"
             />
@@ -173,6 +192,19 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
                   id="fullName"
                   name="fullName"
                   value={formData.fullName}
+                  onChange={handleChange}
+                  required
+                  className="flex-1 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none"
+                />
+              </div>
+
+              <div className="flex items-end gap-4">
+                <label htmlFor="email" className="text-sm font-medium whitespace-nowrap pb-1">Email</label>
+                <input
+                  type="email"
+                  id="email"
+                  name="email"
+                  value={formData.email}
                   onChange={handleChange}
                   required
                   className="flex-1 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none"
