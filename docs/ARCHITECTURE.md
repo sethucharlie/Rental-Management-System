@@ -54,7 +54,7 @@ interface Tenant {
   unitType: string;            // e.g. "Flat" | "House"
   unitNumber: string;          // e.g. "5B"
   rent: string | number;       // e.g. "3000"
-  status: "pending" | "active" | "moved_out" | "eviction_notice" | "archived";
+  status: "pending" | "active" | "moved_out" | "archived";
   isSigned: boolean;           // false until tenant submits
 
   // Set by tenant at signing
@@ -75,11 +75,14 @@ interface Tenant {
 
 ### Key Design Decisions
 
+**Master PDF in Public Folder:**
+The actual lease document (`lease-agreement.pdf`) is stored statically in the `public/` directory. This avoids the complexity and setup of Firebase Storage. The Next.js server handles delivering this file to the browser, where it is embedded directly in the tenant signing page via an `<iframe>`.
+
 **Signature stored as base64 in Firestore:**
-The signature is a PNG exported from the canvas as a data URL (base64 string) and saved directly in the Firestore document. This eliminates the need for Firebase Storage entirely. Signature images are typically 20–50KB — well within Firestore's 1MB document limit.
+The signature is a PNG exported from the canvas as a data URL (base64 string) and saved directly in the Firestore document. Signature images are typically 20–50KB — well within Firestore's 1MB document limit. This completely removes the need for Firebase Storage.
 
 **Client-side Firestore writes:**
-All Firestore reads and writes happen directly from the browser using the Firebase Client SDK. This bypasses the Next.js API routes (which would require the `firebase-admin` SDK for server-side use). The trade-off is that Firestore security rules are the only protection layer — see Security section below.
+All Firestore reads and writes happen directly from the browser using the Firebase Client SDK. This bypasses the Next.js API routes (which would require the `firebase-admin` SDK for server-side use). The trade-off is that Firestore security rules are the primary protection layer.
 
 ---
 
@@ -139,7 +142,7 @@ src/components/
 - On load: reads the Firestore document by `tenantId`
   - If doc doesn't exist → "Link not found" screen
   - If `isSigned === true` → "Already Signed" screen
-  - Otherwise → renders the full form
+  - Otherwise → renders the full form embedding `/lease-agreement.pdf`
 - On submit:
   1. Validates required fields and signature
   2. Exports signature as base64 from canvas
@@ -170,40 +173,8 @@ The `isSigned` flag in Firestore also acts as a database-level guard — the ten
 
 ---
 
-## Navigation Architecture
+## Security (Recommended Rules)
 
-```
-┌─────────────────────────────────────┐
-│         DashboardLayout             │
-│  ┌─────────────────────────────┐   │
-│  │  Sticky Top Nav (desktop)   │   │
-│  │  [Lease Admin] [Tenants] [New Tenant] [Sign Out] │
-│  └─────────────────────────────┘   │
-│                                     │
-│  <main>                             │
-│    {children}   ← page content      │
-│  </main>                            │
-│                                     │
-│  ┌─────────────────────────────┐   │
-│  │  Bottom Tab Bar (mobile)    │   │
-│  │  [Tenants]   [New Tenant]   │   │
-│  └─────────────────────────────┘   │
-└─────────────────────────────────────┘
-```
-
----
-
-## Security
-
-### Current State (Development)
-Firestore rules are open:
-```javascript
-allow read, write: if true;
-```
-
-This is acceptable for development and internal testing only.
-
-### Recommended Production Rules
 ```javascript
 rules_version = '2';
 service cloud.firestore {
@@ -229,8 +200,6 @@ service cloud.firestore {
 }
 ```
 
-> For a stricter setup, restrict admin writes to a specific UID allowlist or a custom claim.
-
 ---
 
 ## Known Limitations
@@ -240,18 +209,4 @@ service cloud.firestore {
 | No server-side validation | Tenant form data is written directly from the browser. A malicious user could manipulate fields via DevTools. |
 | Firebase credentials exposed | `NEXT_PUBLIC_*` env vars are visible in the browser bundle. This is standard for Firebase Web but Firestore rules must be tight to prevent abuse. |
 | No email notifications | Admin must manually check the dashboard for new submissions. |
-| PDF generation is a stub | The "Download PDF" button exists in the UI but has no implementation. |
 | Single admin only | There is no role-based access control — any authenticated Google user who knows the URL can access the dashboard. |
-
----
-
-## Dependencies
-
-| Package | Purpose |
-|---|---|
-| `next` | App framework (App Router) |
-| `react`, `react-dom` | UI library |
-| `firebase` | Firestore, Auth client SDK |
-| `react-signature-canvas` | Canvas-based signature pad |
-| `lucide-react` | Icon library |
-| `tailwindcss` | Utility-first CSS |

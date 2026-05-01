@@ -119,7 +119,6 @@ export default function EditTenantModal({ tenant, isOpen, onClose, onSave }: Edi
               <select name="status" value={formData.status} onChange={handleChange} className="flex-1 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none appearance-none cursor-pointer">
                 <option value="active">Active</option>
                 <option value="pending">Pending</option>
-                <option value="eviction_notice">Eviction Notice</option>
                 <option value="moved_out">Moved Out</option>
                 <option value="archived">Archived</option>
               </select>

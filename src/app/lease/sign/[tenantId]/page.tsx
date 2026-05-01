@@ -131,29 +131,26 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
         <div className="mb-12">
           <div className="flex justify-between items-end mb-4 border-b border-black pb-2">
             <h2 className="text-xl font-medium tracking-wide uppercase">Lease Document</h2>
-            <button
-              type="button"
+            <a
+              href="/lease-agreement.pdf"
+              download="Lease_Agreement.pdf"
               className="flex items-center gap-2 text-xs font-medium border border-black px-3 py-1.5 hover:bg-black hover:text-white transition-colors"
             >
               <Download size={14} />
               Download PDF
-            </button>
+            </a>
           </div>
 
-          <div className="border border-gray-300 p-6 h-80 overflow-y-auto bg-gray-50 text-sm leading-relaxed text-gray-700">
-            <h3 className="font-bold text-black mb-4 uppercase">1. Terms of Agreement</h3>
-            <p className="mb-4">This Lease Agreement is made and entered into on this day between the Landlord and the Tenant. The Landlord hereby leases to the Tenant the premises described below for the term and upon the conditions specified herein.</p>
-
-            <h3 className="font-bold text-black mb-4 uppercase mt-6">2. Rent Payment</h3>
-            <p className="mb-4">The Tenant agrees to pay the Landlord the monthly rent sum specified in the agreement, payable in advance on the first day of each calendar month. Late payments may incur additional fees as described in the full document.</p>
-
-            <h3 className="font-bold text-black mb-4 uppercase mt-6">3. Use of Premises</h3>
-            <p className="mb-4">The premises shall be used strictly for residential purposes by the Tenant and authorized occupants. The Tenant shall not use the premises for any unlawful purpose or permit any nuisance.</p>
-
-            <h3 className="font-bold text-black mb-4 uppercase mt-6">4. Maintenance and Repairs</h3>
-            <p className="mb-4">The Tenant shall keep the premises in a clean and sanitary condition and promptly notify the Landlord of any necessary repairs. The Landlord is responsible for structural repairs unless caused by the Tenant's negligence.</p>
-
-            <p className="mt-8 italic text-xs text-gray-500 text-center">-- Please download the full PDF to view all terms and conditions --</p>
+          <div className="border border-gray-300 h-[600px] w-full bg-gray-50 relative">
+            <iframe 
+              src="/lease-agreement.pdf#view=FitH" 
+              className="w-full h-full"
+              title="Lease Agreement PDF"
+            />
+            {/* Fallback message for browsers that don't support iframes or if the file is missing */}
+            <div className="absolute inset-0 flex items-center justify-center -z-10 text-gray-400 text-sm">
+              Loading document or PDF viewer not supported. Please use the download button.
+            </div>
           </div>
         </div>
 

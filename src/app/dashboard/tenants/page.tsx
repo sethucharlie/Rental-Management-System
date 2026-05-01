@@ -145,8 +145,6 @@ export default function TenantsPage() {
         return <span className="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs uppercase font-bold border border-yellow-200">Moved Out</span>;
       case 'pending':
         return <span className="px-2 py-1 bg-gray-100 text-gray-800 text-xs uppercase font-bold border border-gray-200">Pending</span>;
-      case 'eviction_notice':
-        return <span className="px-2 py-1 bg-red-100 text-red-800 text-xs uppercase font-bold border border-red-200">Eviction Notice</span>;
       case 'archived':
         return <span className="px-2 py-1 bg-gray-200 text-gray-600 text-xs uppercase font-bold border border-gray-300">Archived</span>;
       case 'active':

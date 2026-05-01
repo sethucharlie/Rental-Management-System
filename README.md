@@ -19,7 +19,7 @@ A digital lease-signing platform that allows property managers to generate uniqu
 
 ### Tenant Signing Page
 - Fills in their own details (Name, ID Number, Phone)
-- Reads a summary of lease terms in-browser
+- 📄 **Reads your actual PDF Lease Agreement embedded directly in the page**
 - Signs digitally using a canvas-based signature pad
 - Confirms agreement via checkbox
 - Redirected to a success page on submission
@@ -51,7 +51,7 @@ src/
 │   │   ├── tenants/page.tsx        # Admin dashboard — tenant list
 │   │   └── create-tenant/page.tsx  # Admin — generate signing link
 │   ├── lease/
-│   │   ├── sign/[tenantId]/page.tsx  # Tenant signing page
+│   │   ├── sign/[tenantId]/page.tsx  # Tenant signing page (Embeds PDF & captures signature)
 │   │   └── success/page.tsx          # Post-submission confirmation
 │   ├── login/page.tsx              # Admin login (Google)
 │   ├── layout.tsx                  # Root layout (AuthProvider)
@@ -72,6 +72,8 @@ src/
 │   └── auth-context.tsx           # React context for Firebase auth state
 └── types/
     └── index.ts                   # Tenant TypeScript interface
+public/
+└── lease-agreement.pdf            # The master PDF lease agreement served to tenants
 ```
 
 ---
@@ -84,20 +86,10 @@ src/
   - **Firestore** enabled (test mode or with rules configured)
   - **Authentication** enabled with **Google** provider
 
-### 1. Clone the repository
+### 1. Upload your Lease Agreement PDF
+Drag and drop your lease agreement PDF into the `public/` folder and name it exactly `lease-agreement.pdf`. This is the file that will be shown to tenants.
 
-```bash
-git clone https://github.com/YOUR_USERNAME/lease-management-system.git
-cd lease-management-system
-```
-
-### 2. Install dependencies
-
-```bash
-npm install
-```
-
-### 3. Configure environment variables
+### 2. Configure environment variables
 
 Create a `.env.local` file in the project root:
 
@@ -112,9 +104,10 @@ NEXT_PUBLIC_FIREBASE_APP_ID=your_app_id
 
 > ⚠️ **Never commit `.env.local` to version control.** It is already listed in `.gitignore`.
 
-### 4. Run the development server
+### 3. Run the development server
 
 ```bash
+npm install
 npm run dev
 ```
 
@@ -133,7 +126,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 ### Tenant
 1. Opens the link in any browser
 2. Fills in their Full Name, ID Number, and Phone Number
-3. Reads the lease terms displayed on screen
+3. **Reads the `lease-agreement.pdf` displayed directly on the screen** (or downloads it)
 4. Draws their signature on the canvas
 5. Enters their printed name and date
 6. Ticks the agreement checkbox
@@ -148,42 +141,31 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ## Firebase Security Rules
 
-### Firestore (Development)
+### Recommended Production Rules
 ```javascript
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if true;
+
+    match /tenants/{tenantId} {
+      // Anyone can read a specific tenant doc (needed for the sign page)
+      allow read: if true;
+
+      // Only create if not signed yet and only with expected fields
+      allow create: if request.auth == null
+        && request.resource.data.isSigned == false;
+
+      // Tenant can update ONLY their own doc to submit (once)
+      allow update: if request.auth == null
+        && resource.data.isSigned == false
+        && request.resource.data.isSigned == true;
+
+      // Only authenticated admins can do full writes (edit, archive, delete)
+      allow write: if request.auth != null;
     }
   }
 }
 ```
-
-> ⚠️ **For production**, restrict these rules so only authenticated users can write, and tenants can only update their specific document.
-
----
-
-## Environment
-
-| Variable | Description |
-|---|---|
-| `NEXT_PUBLIC_FIREBASE_API_KEY` | Firebase Web API Key |
-| `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN` | Firebase Auth Domain |
-| `NEXT_PUBLIC_FIREBASE_PROJECT_ID` | Firestore Project ID |
-| `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET` | Storage bucket (not currently used) |
-| `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID` | FCM Sender ID |
-| `NEXT_PUBLIC_FIREBASE_APP_ID` | Firebase App ID |
-
----
-
-## Roadmap
-
-- [ ] Tighten Firestore security rules for production
-- [ ] PDF generation for lease documents
-- [ ] Email notifications to admin on tenant submission
-- [ ] Eviction notice workflow
-- [ ] Multi-property / multi-admin support
 
 ---
 
