@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { CheckCircle } from "lucide-react";
 
 export default function SuccessPage() {
@@ -8,17 +7,11 @@ export default function SuccessPage() {
         <CheckCircle size={64} className="mx-auto mb-6 text-black" strokeWidth={1} />
         <h1 className="text-4xl font-light tracking-tight uppercase">Successfully Signed</h1>
         <p className="text-gray-500 text-sm leading-relaxed">
-          Your lease agreement has been successfully submitted and recorded. A copy of the signed lease will be processed by the landlord.
+          Your lease agreement has been successfully submitted and recorded. An automated email receipt with a copy of the lease has been sent to your email address.
         </p>
-        
-        <div className="pt-8">
-          <Link 
-            href="/"
-            className="inline-block border-2 border-black text-black px-12 py-4 text-sm font-bold uppercase tracking-widest hover:bg-black hover:text-white transition-colors"
-          >
-            Return Home
-          </Link>
-        </div>
+        <p className="text-black font-medium text-sm mt-4">
+          You may now safely close this window.
+        </p>
       </div>
     </div>
   );

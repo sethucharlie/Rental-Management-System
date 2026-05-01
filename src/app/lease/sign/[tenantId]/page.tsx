@@ -146,31 +146,20 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
           <p className="text-gray-500 text-sm">Please review the lease terms carefully, fill in your details, and sign below.</p>
         </div>
 
-        {/* Lease Preview & Download Section */}
-        <div className="mb-12">
-          <div className="flex justify-between items-end mb-4 border-b border-black pb-2">
-            <h2 className="text-xl font-medium tracking-wide uppercase">Lease Document</h2>
-            <a
-              href="/LEASE%20AGREEMENT%20updated.01.pdf"
-              download="Lease_Agreement.pdf"
-              className="flex items-center gap-2 text-xs font-medium border border-black px-3 py-1.5 hover:bg-black hover:text-white transition-colors"
-            >
-              <Download size={14} />
-              Download PDF
-            </a>
+        {/* Lease Download Section */}
+        <div className="mb-12 border border-black p-6 bg-gray-50 flex flex-col sm:flex-row items-center justify-between gap-6">
+          <div>
+            <h2 className="text-xl font-medium tracking-wide uppercase mb-2">Lease Document</h2>
+            <p className="text-sm text-gray-600">Please download and review the full lease agreement carefully before signing below.</p>
           </div>
-
-          <div className="border border-gray-300 h-[600px] w-full bg-gray-50 relative">
-            <iframe 
-              src="/LEASE%20AGREEMENT%20updated.01.pdf#view=FitH" 
-              className="w-full h-full"
-              title="Lease Agreement PDF"
-            />
-            {/* Fallback message for browsers that don't support iframes or if the file is missing */}
-            <div className="absolute inset-0 flex items-center justify-center -z-10 text-gray-400 text-sm">
-              Loading document or PDF viewer not supported. Please use the download button.
-            </div>
-          </div>
+          <a
+            href="/LEASE%20AGREEMENT%20updated.01.pdf"
+            download="Lease_Agreement.pdf"
+            className="flex items-center gap-3 text-sm font-medium border-2 border-black bg-white px-6 py-3 hover:bg-black hover:text-white transition-colors whitespace-nowrap"
+          >
+            <Download size={18} />
+            Download PDF
+          </a>
         </div>
 
         {error && (
