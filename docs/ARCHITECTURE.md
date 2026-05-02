@@ -52,7 +52,7 @@ interface Tenant {
 
   // Set by admin at link creation
   unitType: string;            // e.g. "Flat" | "House"
-  unitNumber: string;          // e.g. "5B"
+  unitNumber: string;          // e.g. "5"
   rent: string | number;       // e.g. "3000"
   status: "pending" | "active" | "moved_out" | "archived";
   isSigned: boolean;           // false until tenant submits
@@ -208,5 +208,4 @@ service cloud.firestore {
 |---|---|
 | No server-side validation | Tenant form data is written directly from the browser. A malicious user could manipulate fields via DevTools. |
 | Firebase credentials exposed | `NEXT_PUBLIC_*` env vars are visible in the browser bundle. This is standard for Firebase Web but Firestore rules must be tight to prevent abuse. |
-| No email notifications | Admin must manually check the dashboard for new submissions. |
 | Single admin only | There is no role-based access control — any authenticated Google user who knows the URL can access the dashboard. |

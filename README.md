@@ -7,22 +7,24 @@ A digital lease-signing platform that allows property managers to generate uniqu
 ## Features
 
 ### Admin Portal
-- 🔐 Google Sign-In authentication
-- 🔗 Generate unique, one-time tenant signing links
-- 📋 View all tenants in a real-time dashboard
-- ✍️ View tenant signatures directly in the browser
-- ✏️ Edit tenant details (unit, rent, status)
-- 📦 Archive tenants
-- 🗑️ Permanently delete tenants (removes Firestore record)
-- 🔍 Search and filter tenants by status or unit
-- 📱 Fully responsive — works on desktop and mobile
+- Google Sign-In authentication
+- Generate unique, one-time tenant signing links
+- View all tenants in a real-time dashboard
+- View tenant signatures directly in the browser
+- Receive automated email notifications when a lease is signed
+- Edit tenant details (unit, rent, status)
+- Archive tenants
+- Permanently delete tenants (removes Firestore record)
+- Search and filter tenants by status or unit
+- Fully responsive — works on desktop and mobile
 
 ### Tenant Signing Page
-- Fills in their own details (Name, ID Number, Phone)
-- 📄 **Reads your actual PDF Lease Agreement embedded directly in the page**
+- Fills in their own details (Name, ID Number, Phone, Email)
+- 📄 **Downloads your actual PDF Lease Agreement directly from the page**
 - Signs digitally using a canvas-based signature pad
 - Confirms agreement via checkbox
 - Redirected to a success page on submission
+- Receives an automated, professional email receipt with the lease attached
 - Protected against double-submission and invalid/expired links
 
 ---
@@ -36,6 +38,7 @@ A digital lease-signing platform that allows property managers to generate uniqu
 | Styling | Tailwind CSS |
 | Database | Firebase Firestore |
 | Auth | Firebase Authentication (Google) |
+| Emails | Nodemailer (Gmail SMTP) |
 | Signature | `react-signature-canvas` |
 | Icons | `lucide-react` |
 
@@ -55,12 +58,9 @@ src/
 │   │   └── success/page.tsx          # Post-submission confirmation
 │   ├── login/page.tsx              # Admin login (Google)
 │   ├── layout.tsx                  # Root layout (AuthProvider)
-│   └── api/tenant/
-│       ├── link/route.ts           # (legacy) POST — create tenant stub
-│       ├── submit/route.ts         # (legacy) POST — submit tenant data
-│       ├── create/route.ts         # (legacy) POST — create tenant
-│       ├── update/[tenantId]/      # PATCH — update tenant
-│       └── delete/[tenantId]/      # DELETE — delete tenant
+│   └── api/
+│       └── email/
+│           └── route.ts            # POST — sends automated 
 ├── components/
 │   ├── SignaturePad.tsx            # Canvas-based signature capture
 │   ├── SignatureViewModal.tsx      # Modal to view tenant signature
@@ -73,7 +73,7 @@ src/
 └── types/
     └── index.ts                   # Tenant TypeScript interface
 public/
-└── lease-agreement.pdf            # The master PDF lease agreement served to tenants
+└── LEASE AGREEMENT updated.01.pdf # The master PDF lease agreement served to tenants
 ```
 
 ---
@@ -87,7 +87,7 @@ public/
   - **Authentication** enabled with **Google** provider
 
 ### 1. Upload your Lease Agreement PDF
-Drag and drop your lease agreement PDF into the `public/` folder and name it exactly `lease-agreement.pdf`. This is the file that will be shown to tenants.
+Drag and drop your lease agreement PDF into the `public/` folder and name it exactly `LEASE AGREEMENT updated.01.pdf`. This is the file that will be shown to tenants.
 
 ### 2. Configure environment variables
 
@@ -100,6 +100,8 @@ NEXT_PUBLIC_FIREBASE_PROJECT_ID=your_project_id
 NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your_project.appspot.com
 NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
 NEXT_PUBLIC_FIREBASE_APP_ID=your_app_id
+EMAIL_USER=your_gmail_address
+EMAIL_PASS=your_16_character_app_password
 ```
 
 > ⚠️ **Never commit `.env.local` to version control.** It is already listed in `.gitignore`.
@@ -125,8 +127,8 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ### Tenant
 1. Opens the link in any browser
-2. Fills in their Full Name, ID Number, and Phone Number
-3. **Reads the `lease-agreement.pdf` displayed directly on the screen** (or downloads it)
+2. Fills in their Full Name, Email, ID Number, and Phone Number
+3. **Downloads the `LEASE AGREEMENT updated.01.pdf` from the screen**
 4. Draws their signature on the canvas
 5. Enters their printed name and date
 6. Ticks the agreement checkbox
