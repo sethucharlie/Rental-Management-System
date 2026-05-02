@@ -174,8 +174,8 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
           <div>
             <h2 className="text-xl font-medium tracking-wide uppercase mb-6 border-b border-black pb-2">Tenant Information</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8">
-              <div className="flex items-end gap-4">
-                <label htmlFor="fullName" className="text-sm font-medium whitespace-nowrap pb-1">Full Name</label>
+              <div className="flex items-end gap-2 sm:gap-4">
+                <label htmlFor="fullName" className="w-24 sm:w-28 text-sm font-medium whitespace-nowrap pb-1">Full Name</label>
                 <input
                   type="text"
                   id="fullName"
@@ -183,12 +183,12 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
                   value={formData.fullName}
                   onChange={handleChange}
                   required
-                  className="flex-1 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none"
+                  className="flex-1 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none w-full min-w-0"
                 />
               </div>
 
-              <div className="flex items-end gap-4">
-                <label htmlFor="email" className="text-sm font-medium whitespace-nowrap pb-1">Email</label>
+              <div className="flex items-end gap-2 sm:gap-4">
+                <label htmlFor="email" className="w-24 sm:w-28 text-sm font-medium whitespace-nowrap pb-1">Email</label>
                 <input
                   type="email"
                   id="email"
@@ -196,12 +196,12 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
                   value={formData.email}
                   onChange={handleChange}
                   required
-                  className="flex-1 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none"
+                  className="flex-1 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none w-full min-w-0"
                 />
               </div>
 
-              <div className="flex items-end gap-4">
-                <label htmlFor="idNumber" className="text-sm font-medium whitespace-nowrap pb-1">ID Number</label>
+              <div className="flex items-end gap-2 sm:gap-4">
+                <label htmlFor="idNumber" className="w-24 sm:w-28 text-sm font-medium whitespace-nowrap pb-1">ID Number</label>
                 <input
                   type="text"
                   id="idNumber"
@@ -209,12 +209,12 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
                   value={formData.idNumber}
                   onChange={handleChange}
                   required
-                  className="flex-1 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none"
+                  className="flex-1 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none w-full min-w-0"
                 />
               </div>
 
-              <div className="flex items-end gap-4">
-                <label htmlFor="phone" className="text-sm font-medium whitespace-nowrap pb-1">Phone</label>
+              <div className="flex items-end gap-2 sm:gap-4">
+                <label htmlFor="phone" className="w-24 sm:w-28 text-sm font-medium whitespace-nowrap pb-1">Phone</label>
                 <input
                   type="tel"
                   id="phone"
@@ -222,7 +222,7 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
                   value={formData.phone}
                   onChange={handleChange}
                   required
-                  className="flex-1 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none"
+                  className="flex-1 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none w-full min-w-0"
                 />
               </div>
             </div>
@@ -238,8 +238,8 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8">
-              <div className="flex items-end gap-4">
-                <label htmlFor="signatureName" className="text-sm font-medium whitespace-nowrap pb-1">Printed Name</label>
+              <div className="flex items-end gap-2 sm:gap-4">
+                <label htmlFor="signatureName" className="w-24 sm:w-28 text-sm font-medium whitespace-nowrap pb-1">Printed Name</label>
                 <input
                   type="text"
                   id="signatureName"
@@ -247,12 +247,12 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
                   value={formData.signatureName}
                   onChange={handleChange}
                   required
-                  className="flex-1 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none"
+                  className="flex-1 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none w-full min-w-0"
                 />
               </div>
 
-              <div className="flex items-end gap-4">
-                <label htmlFor="signatureDate" className="text-sm font-medium whitespace-nowrap pb-1">Date</label>
+              <div className="flex items-end gap-2 sm:gap-4">
+                <label htmlFor="signatureDate" className="w-24 sm:w-28 text-sm font-medium whitespace-nowrap pb-1">Date</label>
                 <input
                   type="date"
                   id="signatureDate"
@@ -260,7 +260,7 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
                   value={formData.signatureDate}
                   onChange={handleChange}
                   required
-                  className="flex-1 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none appearance-none"
+                  className="flex-1 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none appearance-none w-full min-w-0"
                 />
               </div>
             </div>
