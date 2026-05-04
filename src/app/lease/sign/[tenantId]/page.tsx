@@ -12,10 +12,12 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
   const router = useRouter();
   const signatureRef = useRef<SignaturePadRef>(null);
   const [agreed, setAgreed] = useState(false);
+  const CONTACT_EMAIL = process.env.NEXT_PUBLIC_CONTACT_EMAIL;
 
   const [loadingDoc, setLoadingDoc] = useState(true);
   const [isSigned, setIsSigned] = useState(false);
   const [docExists, setDocExists] = useState(true);
+  const [showPopia, setShowPopia] = useState(true);
 
   const [formData, setFormData] = useState({
     fullName: "",
@@ -27,7 +29,6 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
   });
 
   const [submitting, setSubmitting] = useState(false);
-
   // Id validation
   const [error, setError] = useState("");
   const isValidSAId = (id: string) => {
@@ -177,6 +178,43 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
 
   return (
     <div className="min-h-screen bg-white text-black py-12 px-6 md:px-12 font-sans selection:bg-black selection:text-white">
+
+      {/* POPIA Popup */}
+      {showPopia && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center px-4">
+          <div className="bg-white max-w-md w-full p-8 border border-black">
+            <h2 className="text-xl font-medium tracking-wide uppercase mb-4">Privacy Notice</h2>
+            <p className="text-sm text-gray-600 mb-4">
+              In accordance with the{" "}
+              <span className="font-semibold text-black">
+                Protection of Personal Information Act (POPIA)
+              </span>
+              , please note the following before proceeding:
+            </p>
+            <ul className="text-sm text-gray-600 space-y-2 mb-6 list-disc list-inside">
+              <li>We collect your full name, ID number, phone number, and email address.</li>
+              <li>This information is used solely for processing this lease agreement and maintaining tenant records.</li>
+              <li>Your data is stored securely and will not be shared with third parties.</li>
+              <li>
+                You have the right to access, correct, or request deletion of your information by
+                contacting the landlord directly.
+              </li>
+            </ul>
+            <p className="text-sm text-gray-600 mb-6">
+              By clicking{" "}
+              <span className="font-semibold text-black">Accept & Continue</span>, you consent to
+              your personal information being collected and processed as described above.
+            </p>
+            <button
+              onClick={() => setShowPopia(false)}
+              className="w-full bg-black text-white py-3 text-sm font-bold uppercase tracking-widest hover:bg-gray-800 transition-colors"
+            >
+              Accept & Continue
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="max-w-3xl mx-auto">
         <div className="mb-12 text-center md:text-left">
           <h1 className="text-4xl font-light tracking-tight mb-2 uppercase">Lease Agreement</h1>
