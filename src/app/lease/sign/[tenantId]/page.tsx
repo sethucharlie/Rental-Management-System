@@ -27,7 +27,32 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
   });
 
   const [submitting, setSubmitting] = useState(false);
+
+  // Id validation
   const [error, setError] = useState("");
+  const isValidSAId = (id: string) => {
+    if (!/^\d{13}$/.test(id)) return false;
+
+    // Luhn checksum
+    let total = 0;
+    let count = 0;
+
+    for (let i = 0; i < 13; i++) {
+      let digit = parseInt(id[i]);
+
+      if (count % 2 !== 0) {
+        digit *= 2;
+        if (digit > 9) digit -= 9;
+      }
+      total += digit;
+      count++;
+    }
+
+    return total % 10 === 0;
+  };
+
+  // Phone validation
+  const isValidPhone = (phone: string) => /^0\d{9}$/.test(phone);
 
   useEffect(() => {
     const fetchDoc = async () => {
@@ -63,6 +88,18 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
     }
     if (signatureRef.current?.isEmpty()) {
       setError("Please provide a signature.");
+      return;
+    }
+
+    // Id validation
+    if (!isValidSAId(formData.idNumber)) {
+      setError("Please enter a valid South African ID number.");
+      return;
+    }
+
+    // Phone validation
+    if (!isValidPhone(formData.phone)) {
+      setError("Please enter a valid South African phone number.");
       return;
     }
 
@@ -209,6 +246,8 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
                   value={formData.idNumber}
                   onChange={handleChange}
                   required
+                  pattern="\d{13}"
+                  title="ID number must be exactly 13 digits"
                   className="flex-1 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none w-full min-w-0"
                 />
               </div>
@@ -222,6 +261,8 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
                   value={formData.phone}
                   onChange={handleChange}
                   required
+                  pattern="0\d{9}"
+                  title="Phone number must be 10 digits and start with 0"
                   className="flex-1 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none w-full min-w-0"
                 />
               </div>
