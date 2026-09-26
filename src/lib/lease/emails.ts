@@ -1,40 +1,30 @@
-import { NextResponse } from 'next/server';
-import nodemailer from 'nodemailer';
-import path from 'path';
+import path from "path";
+import { MailMessage } from "./ports";
 
-export async function POST(request: Request) {
-  try {
-    const { tenantId, name, email, phone } = await request.json();
+const LEASE_DOCUMENT_PATH = path.join(process.cwd(), "public", "LEASE AGREEMENT updated.01.pdf");
 
-    if (!email || !name) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
-    }
+interface SignedEmailInput {
+  name: string;
+  email: string;
+  phone: string;
+  signedAt: Date;
+  landlordEmail: string;
+  appUrl: string;
+}
 
-    const adminEmail = process.env.EMAIL_USER;
-    const adminPass = process.env.EMAIL_PASS;
+const escapeHtml = (text: string) =>
+  text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-    if (!adminEmail || !adminPass) {
-      console.error('Email configuration missing');
-      return NextResponse.json({ error: 'Server email configuration missing' }, { status: 500 });
-    }
+const formatTime = (at: Date) => at.toLocaleString("en-ZA", { timeZone: "Africa/Johannesburg" });
 
-    // Configure Nodemailer for Gmail
-    const transporter = nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      port: 465,
-      secure: true, // Use SSL
-      auth: {
-        user: adminEmail?.trim(), // Ensure no trailing spaces
-        pass: adminPass?.replace(/\s+/g, ''), // Strip any spaces from the App Password
-      },
-    });
-
-    // 1. Send receipt to Tenant
-    const tenantMailOptions = {
-      from: `"No-Reply | Automated Lease System" <${adminEmail}>`,
-      to: email,
-      subject: `[CONFIRMATION] Digital Lease Agreement - ${name}`,
-      html: `
+export function tenantConfirmationEmail(input: SignedEmailInput): MailMessage {
+  const name = escapeHtml(input.name);
+  const phone = escapeHtml(input.phone);
+  return {
+    from: `"No-Reply | Automated Lease System" <${input.landlordEmail}>`,
+    to: input.email,
+    subject: `[CONFIRMATION] Digital Lease Agreement - ${input.name}`,
+    html: `
         <div style="font-family: Arial, sans-serif; max-w: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
           <div style="background-color: #0f172a; padding: 20px; text-align: center;">
             <h1 style="color: #ffffff; margin: 0; font-size: 20px; font-weight: normal; letter-spacing: 1px;">SYSTEM NOTIFICATION</h1>
@@ -44,13 +34,13 @@ export async function POST(request: Request) {
             <p style="color: #334155; font-size: 15px; line-height: 1.6;">
               This is an automated system confirmation that your digital signature has been successfully captured and securely applied to your lease agreement.
             </p>
-            
+
             <div style="background-color: #f8fafc; border-left: 4px solid #3b82f6; padding: 15px; margin: 25px 0;">
               <p style="margin: 0 0 10px 0; font-weight: bold; color: #0f172a;">Digital Signature Record</p>
               <ul style="margin: 0; padding-left: 20px; color: #475569; font-size: 14px;">
                 <li style="margin-bottom: 5px;"><strong>Signatory:</strong> ${name}</li>
                 <li style="margin-bottom: 5px;"><strong>Contact:</strong> ${phone}</li>
-                <li><strong>Timestamp:</strong> ${new Date().toLocaleString()}</li>
+                <li><strong>Timestamp:</strong> ${formatTime(input.signedAt)}</li>
               </ul>
             </div>
 
@@ -68,42 +58,28 @@ export async function POST(request: Request) {
           </div>
         </div>
       `,
-      attachments: [
-        {
-          filename: 'Lease_Agreement.pdf',
-          path: path.join(process.cwd(), 'public', 'LEASE AGREEMENT updated.01.pdf')
-        }
-      ]
-    };
+    attachments: [{ filename: "Lease_Agreement.pdf", path: LEASE_DOCUMENT_PATH }],
+  };
+}
 
-    // 2. Send notification to Admin
-    const adminMailOptions = {
-      from: `"Lease Notifications" <${adminEmail}>`,
-      to: adminEmail,
-      subject: `New Lease Signed: ${name}`,
-      html: `
+export function landlordNoticeEmail(input: SignedEmailInput): MailMessage {
+  return {
+    from: `"Lease Notifications" <${input.landlordEmail}>`,
+    to: input.landlordEmail,
+    subject: `New Lease Signed: ${input.name}`,
+    html: `
         <div style="font-family: sans-serif; max-w: 600px; margin: 0 auto;">
           <h2 style="color: #000;">New Lease Signature</h2>
           <p>A new lease agreement has just been signed and submitted.</p>
           <p><strong>Tenant Details:</strong></p>
           <ul>
-            <li>Name: ${name}</li>
-            <li>Email: ${email}</li>
-            <li>Phone: ${phone}</li>
-            <li>Time: ${new Date().toLocaleString()}</li>
+            <li>Name: ${escapeHtml(input.name)}</li>
+            <li>Email: ${escapeHtml(input.email)}</li>
+            <li>Phone: ${escapeHtml(input.phone)}</li>
+            <li>Time: ${formatTime(input.signedAt)}</li>
           </ul>
-          <p>You can view their signature and details in your <a href="${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/dashboard/tenants">Admin Dashboard</a>.</p>
+          <p>You can view their signature and details in your <a href="${input.appUrl}/dashboard/tenants">Admin Dashboard</a>.</p>
         </div>
       `,
-    };
-
-    // Send both emails
-    await transporter.sendMail(tenantMailOptions);
-    await transporter.sendMail(adminMailOptions);
-
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error('Email API Error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
-  }
+  };
 }

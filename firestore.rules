@@ -1,0 +1,25 @@
+rules_version = '2';
+
+// Tenants sign through the app's server (firebase-admin), which bypasses these rules.
+// The browser may touch tenant data only as the signed-in landlord, from the dashboard.
+// Before deploying, replace the address below with the landlord's Google account(s),
+// the same addresses as LANDLORD_EMAILS on the server.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isLandlord() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email in ['REPLACE-WITH-LANDLORD@gmail.com'];
+    }
+
+    match /tenants/{tenantId} {
+      allow read, write: if isLandlord();
+    }
+
+    // Everything else stays closed.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

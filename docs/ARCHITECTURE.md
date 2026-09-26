@@ -13,7 +13,7 @@ The system is split into two user-facing surfaces:
 | Admin Portal | `/login`, `/dashboard/*` | Property manager |
 | Tenant Signing Page | `/lease/sign/[tenantId]` | Tenant |
 
-All data is persisted in **Firebase Firestore**. Authentication uses **Firebase Auth** with Google Sign-In. There is no separate backend server — all logic runs either in the browser (client components) or in Next.js Route Handlers.
+All data is persisted in **Firebase Firestore**. Authentication uses **Firebase Auth** with Google Sign-In. There is no separate backend server. The dashboard reads and writes Firestore from the browser as the signed-in landlord. Everything the Tenant does runs in Next.js Route Handlers, which call the **Lease module** on the server.
 
 ---
 
@@ -76,13 +76,16 @@ interface Tenant {
 ### Key Design Decisions
 
 **Master PDF in Public Folder:**
-The actual lease document (`lease-agreement.pdf`) is stored statically in the `public/` directory. This avoids the complexity and setup of Firebase Storage. The Next.js server handles delivering this file to the browser, where it is embedded directly in the tenant signing page via an `<iframe>`.
+The lease document (`public/LEASE AGREEMENT updated.01.pdf`) is a static file in `public/`. This avoids Firebase Storage. The signing page offers it for download, and the Tenant's confirmation email attaches it.
 
 **Signature stored as base64 in Firestore:**
 The signature is a PNG exported from the canvas as a data URL (base64 string) and saved directly in the Firestore document. Signature images are typically 20–50KB — well within Firestore's 1MB document limit. This completely removes the need for Firebase Storage.
 
-**Client-side Firestore writes:**
-All Firestore reads and writes happen directly from the browser using the Firebase Client SDK. This bypasses the Next.js API routes (which would require the `firebase-admin` SDK for server-side use). The trade-off is that Firestore security rules are the primary protection layer.
+**Signing runs on the server:**
+The signing page never touches Firestore. It calls Route Handlers, which call the Lease module (`src/lib/lease/`). The module checks every field again, marks the link signed inside a Firestore transaction (so a link can be signed only once), and sends the emails. Route Handlers use the `firebase-admin` SDK, which bypasses the Firestore rules, so the rules can close all public access.
+
+**The Lease module and its ports:**
+The module holds the rules and talks to the outside only through three ports: a store, a mailer and a clock. Production wires Firestore (`firestore-store.ts`), Gmail through nodemailer (`gmail-mailer.ts`) and the system clock (`server.ts`). Tests wire an in-memory store, a fake mailer and a fixed clock (`testing.ts`). Run the tests with `npm test`.
 
 ---
 
@@ -134,19 +137,19 @@ src/components/
 
 ### `/dashboard/create-tenant`
 - Admin form: Unit Type, Unit Number, Rent
-- On submit: creates a Firestore document with `isSigned: false`
+- On submit: `POST /api/signing-links` with the landlord's Firebase ID token. The server checks the token belongs to a landlord account and the fields are valid, then creates the document with `isSigned: false`
 - Returns a shareable URL: `{origin}/lease/sign/{docId}`
 - Idempotency: `useRef` lock prevents double-writes on rapid clicks
 
 ### `/lease/sign/[tenantId]`
-- On load: reads the Firestore document by `tenantId`
-  - If doc doesn't exist → "Link not found" screen
-  - If `isSigned === true` → "Already Signed" screen
-  - Otherwise → renders the full form embedding `/lease-agreement.pdf`
+- On load: `GET /api/signing-links/{id}` returns only `open`, `not_found` or `already_signed`
+  - `not_found` → "Link not found" screen
+  - `already_signed` → "Already Signed" screen
+  - `open` → renders the form, with a download link for `LEASE AGREEMENT updated.01.pdf`
 - On submit:
-  1. Validates required fields and signature
+  1. Checks fields and signature in the browser for quick feedback
   2. Exports signature as base64 from canvas
-  3. Calls `updateDoc()` with tenant data + `isSigned: true` + `status: "active"`
+  3. `POST /api/signing-links/{id}/sign`. The server checks everything again, saves it with `isSigned: true` and `status: "active"`, and sends two emails through Gmail (nodemailer): a confirmation with the lease PDF to the Tenant and a notice to the landlord. A failed email does not undo the signing
   4. Redirects to `/lease/success`
 
 ### `/lease/success`
@@ -169,36 +172,22 @@ Two layers prevent duplicate Firestore writes:
 
 2. **`disabled={loading}` on the button** — visual/async layer that disables the button once React processes the state update
 
-The `isSigned` flag in Firestore also acts as a database-level guard — the tenant page checks this on load and blocks re-submission if already signed.
+The `isSigned` flag also acts as a database-level guard: the server marks a link signed inside a Firestore transaction, so a second submission gets `already_signed`.
 
 ---
 
-## Security (Recommended Rules)
+## Security
 
-```javascript
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
+The rules live in `firestore.rules` at the repo root. Deploy them from the Firebase console (Firestore → Rules) or with the Firebase CLI. They allow tenant data only to the landlord's Google account(s) and deny everything else. Tenants never reach Firestore directly; the server does it for them with `firebase-admin`.
 
-    match /tenants/{tenantId} {
-      // Anyone can read a specific tenant doc (needed for the sign page)
-      allow read: if true;
+The server needs these environment variables (in `.env.local` locally):
 
-      // Only create if not signed yet and only with expected fields
-      allow create: if request.auth == null
-        && request.resource.data.isSigned == false;
-
-      // Tenant can update ONLY their own doc to submit (once)
-      allow update: if request.auth == null
-        && resource.data.isSigned == false
-        && request.resource.data.isSigned == true;
-
-      // Only authenticated admins can do full writes (edit, archive, delete)
-      allow write: if request.auth != null;
-    }
-  }
-}
-```
+| Variable | Purpose |
+|---|---|
+| `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` | Service account for `firebase-admin` (Firebase console → Project settings → Service accounts → Generate new private key) |
+| `LANDLORD_EMAILS` | Comma-separated Google accounts allowed to create Signing Links; must match the list in `firestore.rules` |
+| `EMAIL_USER`, `EMAIL_PASS` | Gmail address and App Password for sending email |
+| `NEXT_PUBLIC_APP_URL` | Public address of the app, used in the landlord's email |
 
 ---
 
@@ -206,6 +195,5 @@ service cloud.firestore {
 
 | Limitation | Notes |
 |---|---|
-| No server-side validation | Tenant form data is written directly from the browser. A malicious user could manipulate fields via DevTools. |
-| Firebase credentials exposed | `NEXT_PUBLIC_*` env vars are visible in the browser bundle. This is standard for Firebase Web but Firestore rules must be tight to prevent abuse. |
-| Single admin only | There is no role-based access control — any authenticated Google user who knows the URL can access the dashboard. |
+| Firebase credentials exposed | `NEXT_PUBLIC_*` env vars are visible in the browser bundle. This is standard for Firebase Web; the Firestore rules are what protect the data. |
+| Landlord list kept in two places | The landlord's accounts appear in both `LANDLORD_EMAILS` and `firestore.rules`, and must be kept the same by hand. |

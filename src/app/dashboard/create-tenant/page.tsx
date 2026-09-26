@@ -2,8 +2,7 @@
 
 import { useState, useRef } from "react";
 import { Check, Copy } from "lucide-react";
-import { db } from "@/lib/firebase";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { auth } from "@/lib/firebase";
 
 export default function CreateTenantPage() {
   const [formData, setFormData] = useState({
@@ -36,22 +35,20 @@ export default function CreateTenantPage() {
     setError("");
 
     try {
-      // Write directly to Firestore from the client
-      const docRef = await addDoc(collection(db, "tenants"), {
-        unitType: formData.unitType,
-        unitNumber: formData.unitNumber,
-        rent: formData.rent,
-        isSigned: false,
-        status: "pending",
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
+      const idToken = await auth.currentUser?.getIdToken();
+      const res = await fetch("/api/signing-links", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify(formData),
       });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || "Failed to generate link.");
 
       const origin = typeof window !== "undefined" ? window.location.origin : "";
-      setGeneratedLink(`${origin}/lease/sign/${docRef.id}`);
+      setGeneratedLink(`${origin}/lease/sign/${result.id}`);
       setCopied(false);
     } catch (err: any) {
-      setError(err.message || "Failed to generate link. Check Firebase connection.");
+      setError(err.message || "Failed to generate link.");
     } finally {
       isSubmitting.current = false;
       setLoading(false);

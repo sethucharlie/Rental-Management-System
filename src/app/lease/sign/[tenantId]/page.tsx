@@ -4,8 +4,7 @@ import { useState, useRef, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
 import { Download } from "lucide-react";
 import SignaturePad, { SignaturePadRef } from "@/components/SignaturePad";
-import { db } from "@/lib/firebase";
-import { doc, getDoc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { isValidPhone, isValidSAId } from "@/lib/lease/validation";
 
 export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: string }> }) {
   const { tenantId } = use(params);
@@ -31,37 +30,16 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
   const [submitting, setSubmitting] = useState(false);
   // Id validation
   const [error, setError] = useState("");
-  const isValidSAId = (id: string) => {
-    if (!/^\d{13}$/.test(id)) return false;
-
-    // Luhn checksum
-    let total = 0;
-    let count = 0;
-
-    for (let i = 0; i < 13; i++) {
-      let digit = parseInt(id[i]);
-
-      if (count % 2 !== 0) {
-        digit *= 2;
-        if (digit > 9) digit -= 9;
-      }
-      total += digit;
-      count++;
-    }
-
-    return total % 10 === 0;
-  };
-
-  // Phone validation
-  const isValidPhone = (phone: string) => /^0\d{9}$/.test(phone);
 
   useEffect(() => {
     const fetchDoc = async () => {
       try {
-        const tenantDoc = await getDoc(doc(db, "tenants", tenantId));
-        if (!tenantDoc.exists()) {
+        const res = await fetch(`/api/signing-links/${encodeURIComponent(tenantId)}`);
+        if (!res.ok) throw new Error(`Status ${res.status}`);
+        const { status } = await res.json();
+        if (status === "not_found") {
           setDocExists(false);
-        } else if (tenantDoc.data().isSigned) {
+        } else if (status === "already_signed") {
           setIsSigned(true);
         }
       } catch (err) {
@@ -109,37 +87,19 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
       // 1. Get the signature as a base64 data URL
       const signatureBase64 = signatureRef.current?.toDataURL() || "";
 
-      // 2. Save everything directly to Firestore — no Storage needed
-      const tenantRef = doc(db, "tenants", tenantId);
-      await updateDoc(tenantRef, {
-        name: formData.fullName,
-        email: formData.email,
-        idNumber: formData.idNumber,
-        phone: formData.phone,
-        signatureName: formData.signatureName,
-        signatureDate: formData.signatureDate,
-        signatureBase64,   // signature image stored directly in Firestore
-        isSigned: true,
-        status: "active",
-        submittedAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
+      // 2. The server checks everything, saves it and sends the emails
+      const res = await fetch(`/api/signing-links/${encodeURIComponent(tenantId)}/sign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...formData, signatureBase64 }),
       });
-
-      // 3. Trigger Email Notifications via Resend
-      try {
-        await fetch("/api/email", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            tenantId,
-            name: formData.fullName,
-            email: formData.email,
-            phone: formData.phone,
-          }),
-        });
-      } catch (emailErr) {
-        console.error("Failed to send email notification", emailErr);
-        // We don't fail the submission if the email fails, just log it.
+      const outcome = await res.json();
+      if (outcome.status === "already_signed") {
+        setIsSigned(true);
+        return;
+      }
+      if (outcome.status !== "signed") {
+        throw new Error(outcome.error || "An unexpected error occurred. Please try again.");
       }
 
       router.push("/lease/success");
