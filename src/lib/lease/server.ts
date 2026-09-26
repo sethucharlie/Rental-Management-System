@@ -35,21 +35,15 @@ function lazyGmailMailer(): Mailer {
   };
 }
 
-// True only for a request carrying a valid Firebase ID token for a landlord account.
+// True only for a request carrying a valid Firebase ID token with the `landlord` claim,
+// the same test firestore.rules applies. `npm run grant-landlord` sets the claim.
 export async function isLandlordRequest(request: Request): Promise<boolean> {
   const token = request.headers.get("authorization")?.match(/^Bearer (.+)$/)?.[1];
   if (!token) return false;
   try {
-    const { email, email_verified } = await adminAuth().verifyIdToken(token);
-    return !!email && email_verified === true && landlordEmails().includes(email.toLowerCase());
+    const decoded = await adminAuth().verifyIdToken(token);
+    return decoded.landlord === true;
   } catch {
     return false;
   }
-}
-
-function landlordEmails(): string[] {
-  return (process.env.LANDLORD_EMAILS ?? "")
-    .split(",")
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean);
 }

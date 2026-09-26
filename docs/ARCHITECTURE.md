@@ -137,7 +137,7 @@ src/components/
 
 ### `/dashboard/create-tenant`
 - Admin form: Unit Type, Unit Number, Rent
-- On submit: `POST /api/signing-links` with the landlord's Firebase ID token. The server checks the token belongs to a landlord account and the fields are valid, then creates the document with `isSigned: false`
+- On submit: `POST /api/signing-links` with the landlord's Firebase ID token. The server checks the token carries the `landlord` claim and the fields are valid, then creates the document with `isSigned: false`
 - Returns a shareable URL: `{origin}/lease/sign/{docId}`
 - Idempotency: `useRef` lock prevents double-writes on rapid clicks
 
@@ -178,14 +178,14 @@ The `isSigned` flag also acts as a database-level guard: the server marks a link
 
 ## Security
 
-The rules live in `firestore.rules` at the repo root. Deploy them from the Firebase console (Firestore → Rules) or with the Firebase CLI. They allow tenant data only to the landlord's Google account(s) and deny everything else. Tenants never reach Firestore directly; the server does it for them with `firebase-admin`.
+The rules live in `firestore.rules` at the repo root. Deploy them from the Firebase console (Firestore → Rules) or with the Firebase CLI. They allow tenant data only to Google accounts carrying the `landlord` custom claim and deny everything else. No email address appears in the rules or the code. To make an account the landlord, list it in `LANDLORD_EMAILS`, have it sign in to the dashboard once, run `npm run grant-landlord`, then sign out and in again. Tenants never reach Firestore directly; the server does it for them with `firebase-admin`.
 
 The server needs these environment variables (in `.env.local` locally):
 
 | Variable | Purpose |
 |---|---|
 | `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` | Service account for `firebase-admin` (Firebase console → Project settings → Service accounts → Generate new private key) |
-| `LANDLORD_EMAILS` | Comma-separated Google accounts allowed to create Signing Links; must match the list in `firestore.rules` |
+| `LANDLORD_EMAILS` | Comma-separated Google accounts that `npm run grant-landlord` marks as the landlord |
 | `EMAIL_USER`, `EMAIL_PASS` | Gmail address and App Password for sending email |
 | `NEXT_PUBLIC_APP_URL` | Public address of the app, used in the landlord's email |
 
@@ -196,4 +196,4 @@ The server needs these environment variables (in `.env.local` locally):
 | Limitation | Notes |
 |---|---|
 | Firebase credentials exposed | `NEXT_PUBLIC_*` env vars are visible in the browser bundle. This is standard for Firebase Web; the Firestore rules are what protect the data. |
-| Landlord list kept in two places | The landlord's accounts appear in both `LANDLORD_EMAILS` and `firestore.rules`, and must be kept the same by hand. |
+| Landlord claim set by hand | Removing an account from `LANDLORD_EMAILS` does not remove its `landlord` claim; clear it in code with `firebase-admin` if that is ever needed. |
