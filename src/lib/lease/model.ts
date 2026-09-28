@@ -1,0 +1,71 @@
+// Tenants and Leases (ADR 0001). A Tenant is the person; each Lease is one agreement
+// for one Lease Year. Pure code: no Firestore, no clock.
+
+export type TenantState = "current" | "moved_out";
+export type LeaseState = "awaiting_signature" | "signed" | "ended";
+
+export interface TenantRecord {
+  name: string;
+  email: string;
+  phone: string;
+  identityNumberType: "sa_id";
+  identityNumber: string;
+  dateOfBirth: string | null; // YYYY-MM-DD
+  depositPaid: number | null; // null until the landlord records it
+  parkingReservation: boolean | null; // null until the landlord records it
+  state: TenantState;
+  movedOutOn: string | null; // YYYY-MM-DD
+  legacyId?: string; // the old `tenants` document this Tenant was migrated from
+}
+
+export interface LeaseSignature {
+  image: string; // PNG data URL
+  printedName: string;
+  dateSigned: string; // as the Tenant wrote it
+  signedAt: Date;
+}
+
+export interface LeaseRecord {
+  tenantId: string | null; // null until someone signs a first Lease
+  unitType: string;
+  unitNumber: string;
+  rent: number;
+  startDate: string | null; // YYYY-MM-DD
+  endDate: string | null; // YYYY-MM-DD
+  signature: LeaseSignature | null;
+  createdAt: Date;
+  legacyId?: string;
+}
+
+export type Stored<T> = T & { id: string };
+
+// Leases follow the calendar in South Africa, whatever the server's time zone.
+export const dateInSouthAfrica = (at: Date) => at.toLocaleDateString("en-CA", { timeZone: "Africa/Johannesburg" });
+
+// A Lease counts as Ended the day after its end date. The app works this out; it never stores it.
+export function leaseState(lease: LeaseRecord, today: string): LeaseState {
+  if (!lease.signature) return "awaiting_signature";
+  if (lease.endDate && today > lease.endDate) return "ended";
+  return "signed";
+}
+
+export const needsDepositAndParking = (tenant: TenantRecord) =>
+  tenant.depositPaid === null || tenant.parkingReservation === null;
+
+// An SA ID starts YYMMDD. A birth date that would lie in the future belongs to the 1900s.
+export function dateOfBirthFromSAId(idNumber: string, today: string): string | null {
+  const match = /^(\d{2})(\d{2})(\d{2})/.exec(idNumber);
+  if (!match) return null;
+  const [, yy, mm, dd] = match;
+  let date = `20${yy}-${mm}-${dd}`;
+  if (date > today) date = `19${yy}-${mm}-${dd}`;
+
+  const parsed = new Date(`${date}T00:00:00Z`);
+  const isRealDate = !isNaN(parsed.getTime()) && parsed.toISOString().startsWith(date);
+  return isRealDate ? date : null;
+}
+
+// The newest Lease is the current one.
+export function currentLease<T extends LeaseRecord>(leases: T[]): T | null {
+  return leases.reduce<T | null>((latest, l) => (!latest || l.createdAt > latest.createdAt ? l : latest), null);
+}

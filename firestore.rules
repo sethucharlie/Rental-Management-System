@@ -1,21 +1,10 @@
 rules_version = '2';
 
-// Tenants sign through the app's server (firebase-admin), which bypasses these rules.
-// The browser may touch tenant data only as the landlord, from the dashboard.
-// A landlord is a Google account carrying the `landlord` custom claim, which
-// `npm run grant-landlord` sets. No address appears here, so none is published.
+// The browser never reads or writes Firestore. Tenants sign, and the landlord uses the
+// dashboard, through the app's server (firebase-admin), which bypasses these rules and
+// checks for itself that dashboard requests come from the landlord.
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    function isLandlord() {
-      return request.auth != null && request.auth.token.landlord == true;
-    }
-
-    match /tenants/{tenantId} {
-      allow read, write: if isLandlord();
-    }
-
-    // Everything else stays closed.
     match /{document=**} {
       allow read, write: if false;
     }
