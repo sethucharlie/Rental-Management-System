@@ -121,9 +121,9 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ### Admin
 1. Navigate to `/login` and sign in with your Google account
-2. Go to **New Tenant** → fill in Unit Type, Unit Number, and Rent
+2. Go to **New Tenant** → fill in Unit Type, Unit Number, Rent, Deposit, Start Date and Parking Reservation. The form shows when the lease ends.
 3. Click **Generate Link** — a unique URL is created and shown
-4. Copy and send the link to the tenant (WhatsApp, email, etc.)
+4. Copy the link and send it yourself (WhatsApp and so on), or type the tenant's email and click **Email Link**
 
 ### Tenant
 1. Opens the link in any browser

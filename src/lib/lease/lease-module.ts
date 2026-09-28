@@ -1,21 +1,30 @@
 import { Clock, LeaseStore, Mailer, SignResult } from "./ports";
-import { landlordNoticeEmail, tenantConfirmationEmail } from "./emails";
+import { landlordNoticeEmail, signingLinkEmail, tenantConfirmationEmail } from "./emails";
 import { planMigration } from "./legacy";
 import {
   currentLease,
   dateInSouthAfrica,
   dateOfBirthFromSAId,
+  firstLeaseEndDate,
+  isRealDate,
   latestDocumentVersion,
   LeaseDocumentVersion,
   LeaseRecord,
   leaseState,
   needsDepositAndParking,
+  PARKING_BAYS,
   Stored,
   TenantRecord,
   TenantState,
 } from "./model";
-import { findSubmissionError, findTenantDetailsError, SubmissionFields, TenantDetailsFields } from "./validation";
-import { DashboardRow, DocumentView, LeaseView,MigrationReport, SignatureView, TenantView } from "./views";
+import {
+  findSubmissionError,
+  findTenantDetailsError,
+  isValidEmail,
+  SubmissionFields,
+  TenantDetailsFields,
+} from "./validation";
+import { DashboardRow, DocumentView, LeaseView, MigrationReport, SignatureView, TenantView } from "./views";
 
 export interface LeaseModuleDeps {
   store: LeaseStore;
@@ -31,6 +40,9 @@ export interface NewSigningLink {
   unitType: string;
   unitNumber: string;
   rent: string;
+  startDate: string; // YYYY-MM-DD
+  deposit: string;
+  parkingReservation: boolean;
 }
 
 export interface TenantChanges extends TenantDetailsFields {
@@ -53,11 +65,29 @@ export function createLeaseModule({ store, mailer, clock, landlordEmail, appUrl,
     return found;
   };
 
+  // A bay is taken by a Current Tenant's Parking Reservation, or promised to whoever
+  // signs an open first Lease that comes with one.
+  const reservedBays = async () => {
+    const [tenants, leases] = await Promise.all([store.listTenants(), store.listLeases()]);
+    const held = tenants.filter((t) => t.state === "current" && t.parkingReservation === true).length;
+    const promised = leases.filter((l) => l.tenantId === null && l.newTenant?.parkingReservation).length;
+    return held + promised;
+  };
+
+  const signingLinkUrl = (id: string) => `${appUrl}/lease/sign/${encodeURIComponent(id)}`;
+
   return {
     async createSigningLink(input: NewSigningLink): Promise<{ id: string }> {
       if (!["Flat", "House"].includes(input.unitType)) throw new InvalidSigningLinkError("Unit type must be Flat or House.");
       if (!input.unitNumber?.trim()) throw new InvalidSigningLinkError("Please enter a unit number.");
       if (!(Number(input.rent) > 0)) throw new InvalidSigningLinkError("Rent must be a number above zero.");
+      if (!isRealDate(input.startDate)) throw new InvalidSigningLinkError("Please enter a start date.");
+      if (input.deposit?.trim() === "" || !(Number(input.deposit) >= 0)) {
+        throw new InvalidSigningLinkError("Deposit must be a number, zero or more.");
+      }
+      if (input.parkingReservation && (await reservedBays()) >= PARKING_BAYS) {
+        throw new InvalidSigningLinkError("Both Parking Bays are already reserved.");
+      }
 
       const document = latestDocumentVersion(documentVersions, today());
       if (!document) throw new Error("No Lease Document Version is in effect yet.");
@@ -67,13 +97,25 @@ export function createLeaseModule({ store, mailer, clock, landlordEmail, appUrl,
         unitType: input.unitType,
         unitNumber: input.unitNumber.trim(),
         rent: Number(input.rent),
-        startDate: null,
-        endDate: null,
+        startDate: input.startDate,
+        endDate: firstLeaseEndDate(input.startDate),
         documentVersion: document.version,
+        newTenant: { depositPaid: Number(input.deposit), parkingReservation: input.parkingReservation === true },
         signature: null,
         createdAt: clock.now(),
       });
       return { id };
+    },
+
+    // The landlord sends an unsigned Signing Link to the Tenant by email.
+    async emailSigningLink(id: string, to: string): Promise<EmailLinkOutcome> {
+      if (!isValidEmail(to?.trim() ?? "")) return { status: "invalid", error: "Please enter a valid email address." };
+      const lease = await store.getLease(id);
+      if (!lease) return { status: "not_found" };
+      if (lease.signature) return { status: "already_signed" };
+
+      await mailer.send(signingLinkEmail({ to: to.trim(), url: signingLinkUrl(id), lease, landlordEmail }));
+      return { status: "sent" };
     },
 
     // An open link offers the Lease Document Version that Lease is signed on.
@@ -88,6 +130,9 @@ export function createLeaseModule({ store, mailer, clock, landlordEmail, appUrl,
       const error = findSubmissionError(submission);
       if (error) return { status: "invalid", error };
 
+      const lease = await store.getLease(id);
+      if (!lease) return { status: "not_found" };
+
       const signedAt = clock.now();
       const tenant: TenantRecord = {
         name: submission.fullName.trim(),
@@ -96,8 +141,8 @@ export function createLeaseModule({ store, mailer, clock, landlordEmail, appUrl,
         identityNumberType: "sa_id",
         identityNumber: submission.idNumber,
         dateOfBirth: dateOfBirthFromSAId(submission.idNumber, dateInSouthAfrica(signedAt)),
-        depositPaid: null,
-        parkingReservation: null,
+        depositPaid: lease.newTenant?.depositPaid ?? null,
+        parkingReservation: lease.newTenant?.parkingReservation ?? null,
         state: "current",
         movedOutOn: null,
       };
@@ -111,8 +156,7 @@ export function createLeaseModule({ store, mailer, clock, landlordEmail, appUrl,
       if (status === "signed") {
         const email = { ...submission, name: submission.fullName, signedAt, landlordEmail, appUrl };
         try {
-          const signed = await store.getLease(id);
-          const documentFile = documentVersion(signed!.documentVersion).file;
+          const documentFile = documentVersion(lease.documentVersion).file;
           await mailer.send(tenantConfirmationEmail({ ...email, documentFile }));
           await mailer.send(landlordNoticeEmail(email));
         } catch (err) {
@@ -236,7 +280,13 @@ function leaseView(l: Stored<LeaseRecord>, today: string): LeaseView {
 
 export type Submission = SubmissionFields;
 
-export type SignOutcome = { status: SignResult } | { status: "invalid"; error: string };
+export type EmailLinkOutcome =
+  | { status: "sent" }
+  | { status: "not_found" }
+  | { status: "already_signed" }
+  | { status: "invalid"; error: string };
+
+export type SignOutcome ={ status: SignResult } | { status: "invalid"; error: string };
 
 export type UpdateOutcome = { status: "saved" } | { status: "not_found" } | { status: "invalid"; error: string };
 

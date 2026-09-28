@@ -8,11 +8,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Not signed in as the landlord" }, { status: 401 });
   }
   try {
-    const { unitType, unitNumber, rent } = await request.json();
+    const { unitType, unitNumber, rent, startDate, deposit, parkingReservation } = await request.json();
     const { id } = await getLeaseModule().createSigningLink({
       unitType: String(unitType ?? ""),
       unitNumber: String(unitNumber ?? ""),
       rent: String(rent ?? ""),
+      startDate: String(startDate ?? ""),
+      deposit: String(deposit ?? ""),
+      parkingReservation: parkingReservation === true,
     });
     return NextResponse.json({ id });
   } catch (err) {

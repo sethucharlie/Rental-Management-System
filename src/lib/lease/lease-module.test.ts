@@ -23,7 +23,7 @@ describe("Lease module", () => {
   });
 
   it("opens a Signing Link the landlord created", async () => {
-    const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500" });
+    const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500", ...firstLeaseTerms });
 
     expect(await lease.openSigningLink(id)).toMatchObject({ status: "open" });
   });
@@ -33,9 +33,13 @@ describe("Lease module", () => {
     ["a blank unit number", { unitNumber: " " }],
     ["a rent that is not a positive number", { rent: "-5" }],
     ["a rent that is not a number", { rent: "abc" }],
+    ["no start date", { startDate: "" }],
+    ["a start date that does not exist", { startDate: "2026-02-30" }],
+    ["a blank deposit", { deposit: "" }],
+    ["a negative deposit", { deposit: "-1" }],
   ])("refuses to create a Signing Link with %s", async (_, change) => {
     await expect(
-      lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500", ...change }),
+      lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500", ...firstLeaseTerms, ...change }),
     ).rejects.toThrow(InvalidSigningLinkError);
   });
 
@@ -44,14 +48,14 @@ describe("Lease module", () => {
   });
 
   it("shows a signed Signing Link as already signed", async () => {
-    const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500" });
+    const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500", ...firstLeaseTerms });
 
     expect(await lease.signLease(id, validSubmission)).toEqual({ status: "signed" });
     expect(await lease.openSigningLink(id)).toEqual({ status: "already_signed" });
   });
 
   it("refuses to sign the same Signing Link twice", async () => {
-    const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500" });
+    const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500", ...firstLeaseTerms });
     await lease.signLease(id, validSubmission);
 
     expect(await lease.signLease(id, { ...validSubmission, fullName: "Someone Else" })).toEqual({
@@ -69,14 +73,14 @@ describe("Lease module", () => {
     ["an email with a display name", { email: "Thandi <a@x.com>" }, "Please enter a valid email address."],
     ["a missing signature", { signatureBase64: "" }, "Please provide a signature."],
   ])("refuses %s and leaves the link open", async (_, change, error) => {
-    const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500" });
+    const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500", ...firstLeaseTerms });
 
     expect(await lease.signLease(id, { ...validSubmission, ...change })).toEqual({ status: "invalid", error });
     expect(await lease.openSigningLink(id)).toMatchObject({ status: "open" });
   });
 
   it("emails the Tenant the Lease Document and tells the landlord after signing", async () => {
-    const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500" });
+    const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500", ...firstLeaseTerms });
     await lease.signLease(id, validSubmission);
 
     const toTenant = mailer.sent.find((m) => m.to === "thandi@example.com");
@@ -89,7 +93,7 @@ describe("Lease module", () => {
   });
 
   it("sends no email when signing is refused", async () => {
-    const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500" });
+    const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500", ...firstLeaseTerms });
     await lease.signLease(id, { ...validSubmission, phone: "123" });
     await lease.signLease("no-such-link", validSubmission);
 
@@ -105,7 +109,7 @@ describe("Lease module", () => {
       appUrl: "https://lease.example.com",
       documentVersions: [versionOne],
     });
-    const { id } = await failing.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500" });
+    const { id } = await failing.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500", ...firstLeaseTerms });
 
     expect(await failing.signLease(id, validSubmission)).toEqual({ status: "signed" });
     expect(await failing.openSigningLink(id)).toEqual({ status: "already_signed" });
@@ -131,7 +135,7 @@ describe("Tenants and Leases", () => {
   });
 
   it("lists an unsigned Signing Link as a Lease Awaiting Signature with no Tenant", async () => {
-    const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500" });
+    const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500", ...firstLeaseTerms });
 
     expect(await lease.listDashboard()).toEqual([
       { tenant: null, lease: expect.objectContaining({ id, unitNumber: "5", rent: 1500, state: "awaiting_signature" }) },
@@ -139,7 +143,7 @@ describe("Tenants and Leases", () => {
   });
 
   it("makes the signer a Current Tenant holding a Signed Lease", async () => {
-    const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500" });
+    const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500", ...firstLeaseTerms });
     await lease.signLease(id, validSubmission);
 
     const [row, ...rest] = await lease.listDashboard();
@@ -149,7 +153,7 @@ describe("Tenants and Leases", () => {
       identityNumber: "9001015009086",
       dateOfBirth: "1990-01-01",
       state: "current",
-      needsDepositAndParking: true,
+      needsDepositAndParking: false, // the Signing Link carried both
     });
     expect(row.lease).toMatchObject({ id, state: "signed" });
     expect(await lease.getSignature(id)).toEqual({
@@ -171,7 +175,7 @@ describe("Tenants and Leases", () => {
   });
 
   it("records a Move Out with the day it happened", async () => {
-    const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500" });
+    const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500", ...firstLeaseTerms });
     await lease.signLease(id, validSubmission);
     const [{ tenant }] = await lease.listDashboard();
 
@@ -182,7 +186,7 @@ describe("Tenants and Leases", () => {
   });
 
   it("refuses a Tenant edit with an invalid Identity Number", async () => {
-    const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500" });
+    const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500", ...firstLeaseTerms });
     await lease.signLease(id, validSubmission);
     const [{ tenant }] = await lease.listDashboard();
 
@@ -193,7 +197,7 @@ describe("Tenants and Leases", () => {
   });
 
   it("deletes a Tenant together with their Leases", async () => {
-    const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500" });
+    const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500", ...firstLeaseTerms });
     await lease.signLease(id, validSubmission);
     const [{ tenant }] = await lease.listDashboard();
 
@@ -203,8 +207,8 @@ describe("Tenants and Leases", () => {
   });
 
   it("deletes an unsigned Signing Link but not a signed one", async () => {
-    const unsigned = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500" });
-    const signed = await lease.createSigningLink({ unitType: "Flat", unitNumber: "6", rent: "1500" });
+    const unsigned = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500", ...firstLeaseTerms });
+    const signed = await lease.createSigningLink({ unitType: "Flat", unitNumber: "6", rent: "1500", ...firstLeaseTerms });
     await lease.signLease(signed.id, validSubmission);
 
     expect(await lease.deleteSigningLink(unsigned.id)).toEqual({ status: "deleted" });
@@ -345,7 +349,7 @@ describe("Lease Document Versions", () => {
   };
 
   it("offers the signer the version their Signing Link was created on", async () => {
-    const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500" });
+    const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500", ...firstLeaseTerms });
 
     expect(await lease.openSigningLink(id)).toEqual({
       status: "open",
@@ -354,9 +358,9 @@ describe("Lease Document Versions", () => {
   });
 
   it("gives a new Signing Link the latest version, and an older Lease keeps its own", async () => {
-    const older = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500" });
+    const older = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500", ...firstLeaseTerms });
     versions.push(versionTwo);
-    const newer = await lease.createSigningLink({ unitType: "Flat", unitNumber: "6", rent: "1500" });
+    const newer = await lease.createSigningLink({ unitType: "Flat", unitNumber: "6", rent: "1500", ...firstLeaseTerms });
 
     expect(await lease.openSigningLink(older.id)).toMatchObject({ document: { version: 1 } });
     expect(await lease.openSigningLink(newer.id)).toMatchObject({ document: { version: 2 } });
@@ -364,13 +368,13 @@ describe("Lease Document Versions", () => {
 
   it("does not use a version before the day it takes effect", async () => {
     versions.push({ ...versionTwo, effectiveFrom: "2026-11-01" });
-    const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500" });
+    const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500", ...firstLeaseTerms });
 
     expect(await lease.openSigningLink(id)).toMatchObject({ document: { version: 1 } });
   });
 
   it("emails the Tenant the version they signed", async () => {
-    const older = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500" });
+    const older = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500", ...firstLeaseTerms });
     versions.push(versionTwo);
     await lease.signLease(older.id, validSubmission);
 
@@ -404,6 +408,94 @@ describe("Lease Document Versions", () => {
     });
   });
 });
+
+describe("Signing Link for a first Lease", () => {
+  let mailer: FakeMailer;
+  let lease: LeaseModule;
+
+  beforeEach(() => {
+    mailer = createFakeMailer();
+    lease = createLeaseModule({
+      store: createMemoryStore(),
+      mailer,
+      clock: fixedClock(new Date("2026-10-05T09:00:00Z")),
+      landlordEmail: "landlord@example.com",
+      appUrl: "https://lease.example.com",
+      documentVersions: [versionOne],
+    });
+  });
+
+  const link = (terms: Partial<typeof firstLeaseTerms> = {}, unitNumber = "5") =>
+    lease.createSigningLink({ unitType: "Flat", unitNumber, rent: "1500", ...firstLeaseTerms, ...terms });
+
+  it.each([
+    ["31 October", "2026-10-31", "2026-12-31"],
+    ["1 November", "2026-11-01", "2027-12-31"],
+    ["31 December", "2026-12-31", "2027-12-31"],
+  ])("ends a first Lease starting %s on %s's 31 December", async (_, startDate, endDate) => {
+    await link({ startDate });
+
+    const [row] = await lease.listDashboard();
+    expect(row.lease).toMatchObject({ startDate, endDate });
+  });
+
+  it("saves the Deposit and Parking Reservation on the Tenant who signs", async () => {
+    const { id } = await link({ deposit: "1400", parkingReservation: true });
+    await lease.signLease(id, validSubmission);
+
+    const [row] = await lease.listDashboard();
+    expect(row.tenant).toMatchObject({ depositPaid: 1400, parkingReservation: true, needsDepositAndParking: false });
+    expect(row.lease).toMatchObject({ startDate: "2026-10-15", endDate: "2026-12-31" });
+  });
+
+  it("refuses a third Parking Reservation but still allows a link without one", async () => {
+    const first = await link({ parkingReservation: true }, "1");
+    await lease.signLease(first.id, validSubmission);
+    await link({ parkingReservation: true }, "2");
+
+    await expect(link({ parkingReservation: true }, "3")).rejects.toThrow("Both Parking Bays are already reserved.");
+    await expect(link({ parkingReservation: false }, "3")).resolves.toHaveProperty("id");
+  });
+
+  it("frees a bay when an unsigned link is deleted or its holder moves out", async () => {
+    const signed = await link({ parkingReservation: true }, "1");
+    await lease.signLease(signed.id, validSubmission);
+    const unsigned = await link({ parkingReservation: true }, "2");
+
+    await lease.deleteSigningLink(unsigned.id);
+    await expect(link({ parkingReservation: true }, "3")).resolves.toHaveProperty("id");
+
+    const tenant = (await lease.listDashboard()).find((r) => r.tenant)!.tenant!;
+    await lease.updateTenant(tenant.id, { ...tenantDetails, state: "moved_out" });
+    await expect(link({ parkingReservation: true }, "4")).resolves.toHaveProperty("id");
+  });
+
+  it("emails the link to the Tenant", async () => {
+    const { id } = await link();
+
+    expect(await lease.emailSigningLink(id, " thandi@example.com ")).toEqual({ status: "sent" });
+    expect(mailer.sent).toHaveLength(1);
+    expect(mailer.sent[0].to).toBe("thandi@example.com");
+    expect(mailer.sent[0].html).toContain(`https://lease.example.com/lease/sign/${id}`);
+    expect(mailer.sent[0].html).toContain("15 October 2026 to 31 December 2026");
+  });
+
+  it("refuses to email a link to a bad address, or one that is signed or gone", async () => {
+    const { id } = await link();
+
+    expect(await lease.emailSigningLink(id, "thandi")).toEqual({
+      status: "invalid",
+      error: "Please enter a valid email address.",
+    });
+    expect(await lease.emailSigningLink("no-such-link", "thandi@example.com")).toEqual({ status: "not_found" });
+    await lease.signLease(id, validSubmission);
+    mailer.sent.length = 0;
+    expect(await lease.emailSigningLink(id, "thandi@example.com")).toEqual({ status: "already_signed" });
+    expect(mailer.sent).toHaveLength(0);
+  });
+});
+
+const firstLeaseTerms = { startDate: "2026-10-15", deposit: "1500", parkingReservation: false };
 
 const versionOne: LeaseDocumentVersion = {
   version: 1,

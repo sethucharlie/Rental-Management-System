@@ -1,4 +1,5 @@
 import path from "path";
+import { LeaseRecord } from "./model";
 import { MailMessage } from "./ports";
 
 interface SignedEmailInput {
@@ -14,6 +15,40 @@ const escapeHtml = (text: string) =>
   text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 const formatTime = (at: Date) => at.toLocaleString("en-ZA", { timeZone: "Africa/Johannesburg" });
+
+// YYYY-MM-DD to "15 October 2026".
+const formatDate = (date: string) =>
+  new Date(`${date}T00:00:00Z`).toLocaleDateString("en-ZA", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+
+interface SigningLinkEmailInput {
+  to: string;
+  url: string;
+  lease: LeaseRecord;
+  landlordEmail: string;
+}
+
+export function signingLinkEmail({ to, url, lease, landlordEmail }: SigningLinkEmailInput): MailMessage {
+  const period =
+    lease.startDate && lease.endDate ? `${formatDate(lease.startDate)} to ${formatDate(lease.endDate)}` : "as agreed";
+  return {
+    from: `"Lease Agreements" <${landlordEmail}>`,
+    to,
+    subject: "Your lease agreement is ready to sign",
+    html: `
+        <div style="font-family: sans-serif; max-w: 600px; margin: 0 auto;">
+          <h2 style="color: #000;">Your lease is ready to sign</h2>
+          <p>Please read the lease and sign it online at this link:</p>
+          <p><a href="${escapeHtml(url)}">${escapeHtml(url)}</a></p>
+          <ul>
+            <li>Unit: ${escapeHtml(`${lease.unitType} ${lease.unitNumber}`)}</li>
+            <li>Rent: R${lease.rent} a month</li>
+            <li>Lease: ${period}</li>
+          </ul>
+          <p>The link is for you alone. Please do not share it.</p>
+        </div>
+      `,
+  };
+}
 
 // `documentFile` is the signed Lease Document Version's file, under public/.
 export function tenantConfirmationEmail(input: SignedEmailInput & { documentFile: string }): MailMessage {
