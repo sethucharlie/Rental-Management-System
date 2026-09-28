@@ -6,9 +6,10 @@ interface ConfirmDeleteModalProps {
   onClose: () => void;
   onConfirm: () => Promise<void>;
   tenantName: string;
+  detail: string;
 }
 
-export default function ConfirmDeleteModal({ isOpen, onClose, onConfirm, tenantName }: ConfirmDeleteModalProps) {
+export default function ConfirmDeleteModal({ isOpen, onClose, onConfirm, tenantName, detail }: ConfirmDeleteModalProps) {
   const [loading, setLoading] = useState(false);
 
   if (!isOpen) return null;
@@ -41,8 +42,7 @@ export default function ConfirmDeleteModal({ isOpen, onClose, onConfirm, tenantN
         
         <div className="p-6">
           <p className="mb-6">
-            Are you sure you want to completely delete the record for <strong>{tenantName}</strong>? 
-            This action will also remove their signature from storage and cannot be undone.
+            Are you sure you want to delete <strong>{tenantName}</strong>? {detail}
           </p>
 
           <div className="flex justify-end gap-4">

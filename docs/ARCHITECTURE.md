@@ -13,7 +13,7 @@ The system is split into two user-facing surfaces:
 | Admin Portal | `/login`, `/dashboard/*` | Property manager |
 | Tenant Signing Page | `/lease/sign/[tenantId]` | Tenant |
 
-All data is persisted in **Firebase Firestore**. Authentication uses **Firebase Auth** with Google Sign-In. There is no separate backend server. The dashboard reads and writes Firestore from the browser as the signed-in landlord. Everything the Tenant does runs in Next.js Route Handlers, which call the **Lease module** on the server.
+All data is persisted in **Firebase Firestore**. Authentication uses **Firebase Auth** with Google Sign-In. There is no separate backend server. The browser never touches Firestore: the dashboard and the signing page both call Next.js Route Handlers, which call the **Lease module** on the server.
 
 ---
 
@@ -42,36 +42,60 @@ DashboardLayout checks useAuth()
 
 ## Data Model
 
-### Firestore Collection: `tenants`
+### Firestore collections
 
-Each document represents one lease agreement slot.
+The app splits the person from each agreement they sign (ADR 0001). The code lives in `src/lib/lease/model.ts`.
+
+**`tenants`**: one document per Tenant, the person.
 
 ```typescript
-interface Tenant {
-  id: string;                  // Firestore auto-generated document ID
-
-  // Set by admin at link creation
-  unitType: string;            // e.g. "Flat" | "House"
-  unitNumber: string;          // e.g. "5"
-  rent: string | number;       // e.g. "3000"
-  status: "pending" | "active" | "moved_out" | "archived";
-  isSigned: boolean;           // false until tenant submits
-
-  // Set by tenant at signing
-  name?: string;               // Full name
-  idNumber?: string;           // SA ID number
-  phone?: string;              // Phone number
-  signatureName?: string;      // Printed name (from signature block)
-  signatureDate?: string;      // Date signed (from signature block)
-  signatureBase64?: string;    // Full base64 PNG of the drawn signature
-
-  // Timestamps (Firestore serverTimestamp)
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
-  submittedAt?: Timestamp;
-  moveOutDate?: string | null;
+interface TenantRecord {
+  name: string;
+  email: string;
+  phone: string;
+  identityNumberType: "sa_id";
+  identityNumber: string;
+  dateOfBirth: string | null;          // YYYY-MM-DD, from the SA ID
+  depositPaid: number | null;          // null until the landlord records it
+  parkingReservation: boolean | null;  // null until the landlord records it
+  state: "current" | "moved_out";
+  movedOutOn: string | null;           // YYYY-MM-DD
+  legacyId?: string;                   // set on migrated Tenants
 }
 ```
+
+**`leases`**: one document per Lease. The Lease's ID is also its Signing Link: `/lease/sign/{leaseId}`.
+
+```typescript
+interface LeaseRecord {
+  tenantId: string | null;   // null until someone signs a first Lease
+  unitType: string;          // "Flat" | "House"
+  unitNumber: string;
+  rent: number;
+  startDate: string | null;  // YYYY-MM-DD
+  endDate: string | null;    // YYYY-MM-DD
+  signature: { image: string; printedName: string; dateSigned: string; signedAt: Timestamp } | null;
+  createdAt: Timestamp;
+  legacyId?: string;
+}
+```
+
+The app works out two things instead of storing them:
+
+- **Lease state.** Awaiting Signature until signed, then Signed, then Ended from the day after `endDate`, going by the date in Johannesburg.
+- **Needs Deposit and parking.** A Tenant whose `depositPaid` or `parkingReservation` is still `null`.
+
+**`legacyTenants`**: a copy of each old one-document-per-signing record, kept by the migration. Nothing reads it.
+
+### Migrating the old records
+
+Before this split, `tenants` held one document per signing. `npm run migrate-tenants` converts them, one transaction per record:
+
+- A signed record becomes a Tenant and a Signed Lease ending 31 December 2026. Both keep the old document's ID, so the old Signing Link still shows "Already Signed". Records marked moved out or archived become Moved Out Tenants.
+- An unsigned record becomes a Lease Awaiting Signature with the old ID, so its link can still be signed. No Tenant exists until someone signs it.
+- Each old document is copied to `legacyTenants` first. A record whose Lease already exists is skipped, so a second run changes nothing.
+
+Run `npm run migrate-tenants -- --dry-run` first to see what it would do. It needs the same `.env.local` as the server.
 
 ### Key Design Decisions
 
@@ -82,7 +106,7 @@ The lease document (`public/LEASE AGREEMENT updated.01.pdf`) is a static file in
 The signature is a PNG exported from the canvas as a data URL (base64 string) and saved directly in the Firestore document. Signature images are typically 20–50KB — well within Firestore's 1MB document limit. This completely removes the need for Firebase Storage.
 
 **Signing runs on the server:**
-The signing page never touches Firestore. It calls Route Handlers, which call the Lease module (`src/lib/lease/`). The module checks every field again, marks the link signed inside a Firestore transaction (so a link can be signed only once), and sends the emails. Route Handlers use the `firebase-admin` SDK, which bypasses the Firestore rules, so the rules can close all public access.
+Neither the signing page nor the dashboard touches Firestore. They call Route Handlers, which call the Lease module (`src/lib/lease/`). The module checks every field again, signs a Lease inside a Firestore transaction (so a link can be signed only once, and the signer becomes a Tenant in the same step), and sends the emails. Dashboard routes first check the landlord's ID token. Route Handlers use the `firebase-admin` SDK, which bypasses the Firestore rules, so the rules can close all public access.
 
 **The Lease module and its ports:**
 The module holds the rules and talks to the outside only through three ports: a store, a mailer and a clock. Production wires Firestore (`firestore-store.ts`), Gmail through nodemailer (`gmail-mailer.ts`) and the system clock (`server.ts`). Tests wire an in-memory store, a fake mailer and a fixed clock (`testing.ts`). Run the tests with `npm test`.
@@ -105,13 +129,15 @@ src/components/
 │     Used by: /dashboard/tenants/page.tsx
 │
 ├── EditTenantModal.tsx
-│     Form modal for admin to update unitType, unitNumber, rent, status.
-│     Calls updateDoc() directly on Firestore on save.
+│     Form modal for the landlord to edit a Tenant's name, ID number,
+│     phone, email and state (Current or Moved Out).
+│     Saves through PATCH /api/tenants/{id}.
 │     Used by: /dashboard/tenants/page.tsx
 │
 └── ConfirmDeleteModal.tsx
       Confirmation dialog before permanently deleting a tenant record.
-      Calls deleteDoc() on Firestore on confirm.
+      Deletes through DELETE /api/tenants/{id} (the Tenant and all their
+      Leases) or DELETE /api/signing-links/{id} (an unsigned link).
       Used by: /dashboard/tenants/page.tsx
 ```
 
@@ -130,14 +156,14 @@ src/components/
 - Wraps all `/dashboard/*` pages
 
 ### `/dashboard/tenants`
-- Real-time tenant list via Firestore `onSnapshot` listener
-- Features: search, filter by status/unit, sort by name or date
-- Row actions: edit, view signature, archive, delete
-- All mutations (edit, archive, delete) write directly to Firestore
+- Loads `GET /api/tenants`: one row per Tenant with their current (newest) Lease, plus one row per first Lease nobody has signed yet
+- Shows Tenant state, Lease state and end date, and marks Tenants whose Deposit and parking are not recorded
+- Features: search by name, filter by Tenant state, Lease state and unit, sort by name or date
+- Row actions: edit Tenant, view signature (`GET /api/leases/{id}/signature`), copy an unsigned Signing Link, delete
 
 ### `/dashboard/create-tenant`
 - Admin form: Unit Type, Unit Number, Rent
-- On submit: `POST /api/signing-links` with the landlord's Firebase ID token. The server checks the token carries the `landlord` claim and the fields are valid, then creates the document with `isSigned: false`
+- On submit: `POST /api/signing-links` with the landlord's Firebase ID token. The server checks the token carries the `landlord` claim and the fields are valid, then creates a Lease Awaiting Signature with no Tenant
 - Returns a shareable URL: `{origin}/lease/sign/{docId}`
 - Idempotency: `useRef` lock prevents double-writes on rapid clicks
 
@@ -149,7 +175,7 @@ src/components/
 - On submit:
   1. Checks fields and signature in the browser for quick feedback
   2. Exports signature as base64 from canvas
-  3. `POST /api/signing-links/{id}/sign`. The server checks everything again, saves it with `isSigned: true` and `status: "active"`, and sends two emails through Gmail (nodemailer): a confirmation with the lease PDF to the Tenant and a notice to the landlord. A failed email does not undo the signing
+  3. `POST /api/signing-links/{id}/sign`. The server checks everything again, creates the Tenant, links the Lease to them and saves the signature in one transaction, and sends two emails through Gmail (nodemailer): a confirmation with the lease PDF to the Tenant and a notice to the landlord. A failed email does not undo the signing
   4. Redirects to `/lease/success`
 
 ### `/lease/success`
@@ -172,13 +198,13 @@ Two layers prevent duplicate Firestore writes:
 
 2. **`disabled={loading}` on the button** — visual/async layer that disables the button once React processes the state update
 
-The `isSigned` flag also acts as a database-level guard: the server marks a link signed inside a Firestore transaction, so a second submission gets `already_signed`.
+The Lease's `signature` also acts as a database-level guard: the server signs a Lease inside a Firestore transaction only if it has none yet, so a second submission gets `already_signed`.
 
 ---
 
 ## Security
 
-The rules live in `firestore.rules` at the repo root. Deploy them from the Firebase console (Firestore → Rules) or with the Firebase CLI. They allow tenant data only to Google accounts carrying the `landlord` custom claim and deny everything else. No email address appears in the rules or the code. To make an account the landlord, list it in `LANDLORD_EMAILS`, have it sign in to the dashboard once, run `npm run grant-landlord`, then sign out and in again. Tenants never reach Firestore directly; the server does it for them with `firebase-admin`.
+The rules live in `firestore.rules` at the repo root. Deploy them from the Firebase console (Firestore → Rules) or with the Firebase CLI. They deny all access from the browser. The server reaches Firestore with `firebase-admin`, which bypasses the rules, and lets only Google accounts carrying the `landlord` custom claim use the dashboard routes. No email address appears in the rules or the code. To make an account the landlord, list it in `LANDLORD_EMAILS`, have it sign in to the dashboard once, run `npm run grant-landlord`, then sign out and in again.
 
 The server needs these environment variables (in `.env.local` locally):
 
@@ -195,5 +221,5 @@ The server needs these environment variables (in `.env.local` locally):
 
 | Limitation | Notes |
 |---|---|
-| Firebase credentials exposed | `NEXT_PUBLIC_*` env vars are visible in the browser bundle. This is standard for Firebase Web; the Firestore rules are what protect the data. |
+| Firebase credentials exposed | `NEXT_PUBLIC_*` env vars are visible in the browser bundle. This is standard for Firebase Web; the Firestore rules deny all browser access, so the keys reach no data. |
 | Landlord claim set by hand | Removing an account from `LANDLORD_EMAILS` does not remove its `landlord` claim; clear it in code with `firebase-admin` if that is ever needed. |

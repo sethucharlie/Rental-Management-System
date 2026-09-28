@@ -14,7 +14,7 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
   const CONTACT_EMAIL = process.env.NEXT_PUBLIC_CONTACT_EMAIL;
 
   const [loadingDoc, setLoadingDoc] = useState(true);
-  const [isSigned, setIsSigned] = useState(false);
+  const [alreadySigned, setAlreadySigned] = useState(false);
   const [docExists, setDocExists] = useState(true);
   const [showPopia, setShowPopia] = useState(true);
 
@@ -40,7 +40,7 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
         if (status === "not_found") {
           setDocExists(false);
         } else if (status === "already_signed") {
-          setIsSigned(true);
+          setAlreadySigned(true);
         }
       } catch (err) {
         console.error("Failed to load lease info", err);
@@ -95,7 +95,7 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
       });
       const outcome = await res.json();
       if (outcome.status === "already_signed") {
-        setIsSigned(true);
+        setAlreadySigned(true);
         return;
       }
       if (outcome.status !== "signed") {
@@ -125,7 +125,7 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
     );
   }
 
-  if (isSigned) {
+  if (alreadySigned) {
     return (
       <div className="min-h-screen bg-white text-black py-12 px-6 flex items-center justify-center font-sans">
         <div className="max-w-md text-center">
