@@ -1,14 +1,14 @@
 // One-off: turns each old `tenants` document into a Tenant and a Lease (ADR 0001).
 // Each old document is first copied to `legacyTenants`. Safe to run again: it skips
-// anything already done. Look before you leap:
+// anything already done. Do a dry run first:
 //
 //   npm run migrate-tenants -- --dry-run
 //   npm run migrate-tenants
-import nextEnv from "@next/env";
+import { loadEnvConfig } from "@next/env";
 import { getLeaseModule } from "../src/lib/lease/server";
 
 async function main() {
-  nextEnv.loadEnvConfig(process.cwd());
+  loadEnvConfig(process.cwd());
   const dryRun = process.argv.includes("--dry-run");
 
   const report = await getLeaseModule().migrate({ dryRun });
