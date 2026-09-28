@@ -44,7 +44,7 @@ export function planMigration(old: LegacyRecord, now: Date, today: string): Migr
     signature: signed
       ? {
           image: old.signatureBase64 ?? "",
-          printedName: old.signatureName ?? old.name ?? "",
+          printedName: (old.signatureName ?? old.name ?? "").trim(),
           dateSigned: old.signatureDate ?? "",
           signedAt: old.submittedAt ?? old.updatedAt ?? old.createdAt ?? now,
         }
@@ -56,11 +56,11 @@ export function planMigration(old: LegacyRecord, now: Date, today: string): Migr
 
   // "archived" was how the landlord hid people who had left.
   const movedOut = old.status === "moved_out" || old.status === "archived";
-  const identityNumber = old.idNumber ?? "";
+  const identityNumber = old.idNumber?.trim() ?? "";
   const tenant: TenantRecord = {
-    name: old.name ?? "",
-    email: old.email ?? "",
-    phone: old.phone ?? "",
+    name: old.name?.trim() ?? "",
+    email: old.email?.trim() ?? "",
+    phone: old.phone?.trim() ?? "",
     identityNumberType: "sa_id",
     identityNumber,
     dateOfBirth: dateOfBirthFromSAId(identityNumber, today),

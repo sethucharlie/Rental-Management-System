@@ -234,6 +234,19 @@ describe("Tenants and Leases", () => {
       expect(await lease.openSigningLink("old-1")).toEqual({ status: "already_signed" });
     });
 
+    it("trims stray spaces from old details", async () => {
+      store.addLegacyRecord({ ...signedLegacy, name: " Sipho Dlamini ", phone: "0831234567 ", idNumber: " 9001015009086" });
+
+      await lease.migrate({ dryRun: false });
+
+      expect((await lease.listDashboard())[0].tenant).toMatchObject({
+        name: "Sipho Dlamini",
+        phone: "0831234567",
+        identityNumber: "9001015009086",
+        dateOfBirth: "1990-01-01",
+      });
+    });
+
     it("turns people who had moved out or been hidden into Moved Out Tenants", async () => {
       store.addLegacyRecord({ ...signedLegacy, id: "old-1", status: "moved_out", moveOutDate: "2026-06-30T10:00:00.000Z" });
       store.addLegacyRecord({ ...signedLegacy, id: "old-2", status: "archived" });

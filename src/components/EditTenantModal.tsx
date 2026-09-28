@@ -69,27 +69,27 @@ export default function EditTenantModal({ tenant, isOpen, onClose, onSave }: Edi
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             <div className="flex items-end gap-4">
               <label className="text-sm font-medium whitespace-nowrap pb-1">Name</label>
-              <input type="text" name="name" value={formData.name} onChange={handleChange} required className="flex-1 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none" />
+              <input type="text" name="name" value={formData.name} onChange={handleChange} required className="flex-1 min-w-0 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none" />
             </div>
 
             <div className="flex items-end gap-4">
               <label className="text-sm font-medium whitespace-nowrap pb-1">ID Number</label>
-              <input type="text" name="identityNumber" value={formData.identityNumber} onChange={handleChange} required className="flex-1 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none" />
+              <input type="text" name="identityNumber" value={formData.identityNumber} onChange={handleChange} required className="flex-1 min-w-0 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none" />
             </div>
 
             <div className="flex items-end gap-4">
               <label className="text-sm font-medium whitespace-nowrap pb-1">Phone</label>
-              <input type="tel" name="phone" value={formData.phone} onChange={handleChange} required className="flex-1 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none" />
+              <input type="tel" name="phone" value={formData.phone} onChange={handleChange} required className="flex-1 min-w-0 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none" />
             </div>
 
             <div className="flex items-end gap-4">
               <label className="text-sm font-medium whitespace-nowrap pb-1">Email</label>
-              <input type="email" name="email" value={formData.email} onChange={handleChange} required className="flex-1 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none" />
+              <input type="email" name="email" value={formData.email} onChange={handleChange} required className="flex-1 min-w-0 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none" />
             </div>
 
             <div className="flex items-end gap-4 md:col-span-2">
               <label className="text-sm font-medium whitespace-nowrap pb-1">State</label>
-              <select name="state" value={formData.state} onChange={handleChange} className="flex-1 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none appearance-none cursor-pointer">
+              <select name="state" value={formData.state} onChange={handleChange} className="flex-1 min-w-0 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none appearance-none cursor-pointer">
                 <option value="current">Current</option>
                 <option value="moved_out">Moved Out</option>
               </select>
