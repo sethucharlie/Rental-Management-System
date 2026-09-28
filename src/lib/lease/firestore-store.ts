@@ -117,6 +117,8 @@ function leaseFromDoc(id: string, d: DocumentData): Stored<LeaseRecord> {
     rent: Number(d.rent) || 0,
     startDate: d.startDate ?? null,
     endDate: d.endDate ?? null,
+    // Leases saved before versions existed were all signed on Version 1.
+    documentVersion: typeof d.documentVersion === "number" ? d.documentVersion : 1,
     signature: d.signature
       ? {
           image: d.signature.image ?? "",

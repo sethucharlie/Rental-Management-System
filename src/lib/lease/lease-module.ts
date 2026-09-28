@@ -5,6 +5,8 @@ import {
   currentLease,
   dateInSouthAfrica,
   dateOfBirthFromSAId,
+  latestDocumentVersion,
+  LeaseDocumentVersion,
   LeaseRecord,
   leaseState,
   needsDepositAndParking,
@@ -13,7 +15,7 @@ import {
   TenantState,
 } from "./model";
 import { findSubmissionError, findTenantDetailsError, SubmissionFields, TenantDetailsFields } from "./validation";
-import { DashboardRow, LeaseView, MigrationReport, SignatureView, TenantView } from "./views";
+import { DashboardRow, DocumentView, LeaseView,MigrationReport, SignatureView, TenantView } from "./views";
 
 export interface LeaseModuleDeps {
   store: LeaseStore;
@@ -21,6 +23,8 @@ export interface LeaseModuleDeps {
   clock: Clock;
   landlordEmail: string;
   appUrl: string;
+  // Read only: the module offers no way to change or remove a version.
+  documentVersions: readonly LeaseDocumentVersion[];
 }
 
 export interface NewSigningLink {
@@ -35,16 +39,28 @@ export interface TenantChanges extends TenantDetailsFields {
 
 export class InvalidSigningLinkError extends Error {}
 
-export type OpenResult = { status: "open" } | { status: "not_found" } | { status: "already_signed" };
+export type OpenResult =
+  | { status: "open"; document: DocumentView }
+  | { status: "not_found" }
+  | { status: "already_signed" };
 
-export function createLeaseModule({ store, mailer, clock, landlordEmail, appUrl }: LeaseModuleDeps) {
+export function createLeaseModule({ store, mailer, clock, landlordEmail, appUrl, documentVersions }: LeaseModuleDeps) {
   const today = () => dateInSouthAfrica(clock.now());
+
+  const documentVersion = (version: number) => {
+    const found = documentVersions.find((v) => v.version === version);
+    if (!found) throw new Error(`Lease Document Version ${version} is not registered.`);
+    return found;
+  };
 
   return {
     async createSigningLink(input: NewSigningLink): Promise<{ id: string }> {
       if (!["Flat", "House"].includes(input.unitType)) throw new InvalidSigningLinkError("Unit type must be Flat or House.");
       if (!input.unitNumber?.trim()) throw new InvalidSigningLinkError("Please enter a unit number.");
       if (!(Number(input.rent) > 0)) throw new InvalidSigningLinkError("Rent must be a number above zero.");
+
+      const document = latestDocumentVersion(documentVersions, today());
+      if (!document) throw new Error("No Lease Document Version is in effect yet.");
 
       const id = await store.createLease({
         tenantId: null,
@@ -53,17 +69,19 @@ export function createLeaseModule({ store, mailer, clock, landlordEmail, appUrl 
         rent: Number(input.rent),
         startDate: null,
         endDate: null,
+        documentVersion: document.version,
         signature: null,
         createdAt: clock.now(),
       });
       return { id };
     },
 
+    // An open link offers the Lease Document Version that Lease is signed on.
     async openSigningLink(id: string): Promise<OpenResult> {
       const lease = await store.getLease(id);
       if (!lease) return { status: "not_found" };
       if (lease.signature) return { status: "already_signed" };
-      return { status: "open" };
+      return { status: "open", document: documentView(documentVersion(lease.documentVersion)) };
     },
 
     async signLease(id: string, submission: Submission): Promise<SignOutcome> {
@@ -93,7 +111,9 @@ export function createLeaseModule({ store, mailer, clock, landlordEmail, appUrl 
       if (status === "signed") {
         const email = { ...submission, name: submission.fullName, signedAt, landlordEmail, appUrl };
         try {
-          await mailer.send(tenantConfirmationEmail(email));
+          const signed = await store.getLease(id);
+          const documentFile = documentVersion(signed!.documentVersion).file;
+          await mailer.send(tenantConfirmationEmail({ ...email, documentFile }));
           await mailer.send(landlordNoticeEmail(email));
         } catch (err) {
           // The Lease is signed either way; a lost email must not undo it.
@@ -195,6 +215,10 @@ function tenantView(t: Stored<TenantRecord>): TenantView {
     movedOutOn: t.movedOutOn,
     needsDepositAndParking: needsDepositAndParking(t),
   };
+}
+
+function documentView(v: LeaseDocumentVersion): DocumentView {
+  return { version: v.version, url: "/" + v.file.split("/").map(encodeURIComponent).join("/") };
 }
 
 function leaseView(l: Stored<LeaseRecord>, today: string): LeaseView {

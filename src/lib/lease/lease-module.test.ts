@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { createLeaseModule, InvalidSigningLinkError, LeaseModule } from "./lease-module";
 import { createMemoryStore, createFakeMailer, fixedClock, settableClock, FakeMailer, MemoryStore } from "./testing";
+import { LeaseDocumentVersion } from "./model";
+import { LEASE_DOCUMENT_VERSIONS } from "./document-versions";
+import { existsSync } from "fs";
+import path from "path";
 
 describe("Lease module", () => {
   let lease: LeaseModule;
@@ -14,13 +18,14 @@ describe("Lease module", () => {
       clock: fixedClock(new Date("2026-10-05T09:00:00Z")),
       landlordEmail: "landlord@example.com",
       appUrl: "https://lease.example.com",
+      documentVersions: [versionOne],
     });
   });
 
   it("opens a Signing Link the landlord created", async () => {
     const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500" });
 
-    expect(await lease.openSigningLink(id)).toEqual({ status: "open" });
+    expect(await lease.openSigningLink(id)).toMatchObject({ status: "open" });
   });
 
   it.each([
@@ -67,7 +72,7 @@ describe("Lease module", () => {
     const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500" });
 
     expect(await lease.signLease(id, { ...validSubmission, ...change })).toEqual({ status: "invalid", error });
-    expect(await lease.openSigningLink(id)).toEqual({ status: "open" });
+    expect(await lease.openSigningLink(id)).toMatchObject({ status: "open" });
   });
 
   it("emails the Tenant the Lease Document and tells the landlord after signing", async () => {
@@ -98,6 +103,7 @@ describe("Lease module", () => {
       clock: fixedClock(new Date("2026-10-05T09:00:00Z")),
       landlordEmail: "landlord@example.com",
       appUrl: "https://lease.example.com",
+      documentVersions: [versionOne],
     });
     const { id } = await failing.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500" });
 
@@ -120,6 +126,7 @@ describe("Tenants and Leases", () => {
       clock,
       landlordEmail: "landlord@example.com",
       appUrl: "https://lease.example.com",
+      documentVersions: [versionOne],
     });
   });
 
@@ -268,7 +275,7 @@ describe("Tenants and Leases", () => {
       expect(await lease.listDashboard()).toEqual([
         { tenant: null, lease: expect.objectContaining({ id: "old-2", unitType: "House", rent: 3000, state: "awaiting_signature" }) },
       ]);
-      expect(await lease.openSigningLink("old-2")).toEqual({ status: "open" });
+      expect(await lease.openSigningLink("old-2")).toMatchObject({ status: "open" });
       expect(await lease.signLease("old-2", validSubmission)).toEqual({ status: "signed" });
       const [row] = await lease.listDashboard();
       expect(row.tenant?.name).toBe("Thandi Mokoena");
@@ -309,6 +316,101 @@ describe("Tenants and Leases", () => {
     });
   });
 });
+
+describe("Lease Document Versions", () => {
+  let store: MemoryStore;
+  let versions: LeaseDocumentVersion[];
+  let mailer: FakeMailer;
+  let lease: LeaseModule;
+
+  beforeEach(() => {
+    store = createMemoryStore();
+    versions = [versionOne];
+    mailer = createFakeMailer();
+    lease = createLeaseModule({
+      store,
+      mailer,
+      clock: fixedClock(new Date("2026-10-05T09:00:00Z")),
+      landlordEmail: "landlord@example.com",
+      appUrl: "https://lease.example.com",
+      documentVersions: versions,
+    });
+  });
+
+  const versionTwo = {
+    version: 2,
+    file: "lease-documents/version-2.pdf",
+    changeNote: "Adds the parking clause.",
+    effectiveFrom: "2026-10-01",
+  };
+
+  it("offers the signer the version their Signing Link was created on", async () => {
+    const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500" });
+
+    expect(await lease.openSigningLink(id)).toEqual({
+      status: "open",
+      document: { version: 1, url: "/lease-documents/version-1.pdf" },
+    });
+  });
+
+  it("gives a new Signing Link the latest version, and an older Lease keeps its own", async () => {
+    const older = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500" });
+    versions.push(versionTwo);
+    const newer = await lease.createSigningLink({ unitType: "Flat", unitNumber: "6", rent: "1500" });
+
+    expect(await lease.openSigningLink(older.id)).toMatchObject({ document: { version: 1 } });
+    expect(await lease.openSigningLink(newer.id)).toMatchObject({ document: { version: 2 } });
+  });
+
+  it("does not use a version before the day it takes effect", async () => {
+    versions.push({ ...versionTwo, effectiveFrom: "2026-11-01" });
+    const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500" });
+
+    expect(await lease.openSigningLink(id)).toMatchObject({ document: { version: 1 } });
+  });
+
+  it("emails the Tenant the version they signed", async () => {
+    const older = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500" });
+    versions.push(versionTwo);
+    await lease.signLease(older.id, validSubmission);
+
+    const attached = mailer.sent.find((m) => m.to === "thandi@example.com")?.attachments?.[0].path;
+    expect(attached?.replace(/\\/g, "/")).toMatch(/public\/lease-documents\/version-1\.pdf$/);
+  });
+
+  it("points every migrated Lease to Version 1", async () => {
+    store.addLegacyRecord(signedLegacy);
+    store.addLegacyRecord(unsignedLegacy);
+    versions.push(versionTwo);
+
+    await lease.migrate({ dryRun: false });
+
+    expect((await store.getLease("old-1"))?.documentVersion).toBe(1);
+    expect(await lease.openSigningLink("old-2")).toMatchObject({ document: { version: 1 } });
+  });
+
+  it("offers no way to edit or delete a version", () => {
+    const changesVersions = Object.keys(lease).filter((name) => /(edit|update|delete|remove).*(version|document)/i.test(name));
+
+    expect(changesVersions).toEqual([]);
+  });
+
+  it("registers Version 1, numbers versions 1, 2, 3 in order, and ships each file", () => {
+    expect(LEASE_DOCUMENT_VERSIONS[0]).toMatchObject({ version: 1, file: "lease-documents/version-1.pdf" });
+    LEASE_DOCUMENT_VERSIONS.forEach((v, i) => {
+      expect(v.version).toBe(i + 1);
+      expect(v.changeNote.trim()).not.toBe("");
+      expect(existsSync(path.join(process.cwd(), "public", v.file))).toBe(true);
+    });
+  });
+});
+
+const versionOne: LeaseDocumentVersion = {
+  version: 1,
+  file: "lease-documents/version-1.pdf",
+  changeNote: "The lease as first used for online signing.",
+  effectiveFrom: "2026-05-01",
+};
 
 const signedLegacy = {
   id: "old-1",

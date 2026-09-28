@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Download } from "lucide-react";
 import SignaturePad, { SignaturePadRef } from "@/components/SignaturePad";
 import { isValidPhone, isValidSAId } from "@/lib/lease/validation";
+import type { DocumentView } from "@/lib/lease/views";
 
 export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: string }> }) {
   const { tenantId } = use(params);
@@ -16,6 +17,7 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
   const [loadingDoc, setLoadingDoc] = useState(true);
   const [alreadySigned, setAlreadySigned] = useState(false);
   const [docExists, setDocExists] = useState(true);
+  const [leaseDocument, setLeaseDocument] = useState<DocumentView | null>(null);
   const [showPopia, setShowPopia] = useState(true);
 
   const [formData, setFormData] = useState({
@@ -36,11 +38,13 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
       try {
         const res = await fetch(`/api/signing-links/${encodeURIComponent(tenantId)}`);
         if (!res.ok) throw new Error(`Status ${res.status}`);
-        const { status } = await res.json();
-        if (status === "not_found") {
+        const result = await res.json();
+        if (result.status === "not_found") {
           setDocExists(false);
-        } else if (status === "already_signed") {
+        } else if (result.status === "already_signed") {
           setAlreadySigned(true);
+        } else {
+          setLeaseDocument(result.document);
         }
       } catch (err) {
         console.error("Failed to load lease info", err);
@@ -188,8 +192,8 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
             <p className="text-sm text-gray-600">Please download and review the full lease agreement carefully before signing below.</p>
           </div>
           <a
-            href="/LEASE%20AGREEMENT%20updated.01.pdf"
-            download="Lease_Agreement.pdf"
+            href={leaseDocument?.url}
+            download={`Lease_Agreement_Version_${leaseDocument?.version}.pdf`}
             className="flex items-center gap-3 text-sm font-medium border-2 border-black bg-white px-6 py-3 hover:bg-black hover:text-white transition-colors whitespace-nowrap"
           >
             <Download size={18} />

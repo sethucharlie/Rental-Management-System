@@ -41,6 +41,7 @@ export function planMigration(old: LegacyRecord, now: Date, today: string): Migr
     rent: Number(old.rent) || 0,
     startDate: null,
     endDate: signed ? MIGRATED_LEASE_END : null,
+    documentVersion: 1, // the only version before Renewals
     signature: signed
       ? {
           image: old.signatureBase64 ?? "",
