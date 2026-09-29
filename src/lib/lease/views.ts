@@ -39,6 +39,12 @@ export interface SignatureView {
   dateSigned: string;
 }
 
+// The Lease Document Version a signing page offers, and where to download it.
+export interface DocumentView {
+  version: number;
+  url: string;
+}
+
 export interface MigrationReport {
   migrated: number;
   skipped: number;

@@ -1,8 +1,6 @@
 import path from "path";
 import { MailMessage } from "./ports";
 
-const LEASE_DOCUMENT_PATH = path.join(process.cwd(), "public", "LEASE AGREEMENT updated.01.pdf");
-
 interface SignedEmailInput {
   name: string;
   email: string;
@@ -17,7 +15,8 @@ const escapeHtml = (text: string) =>
 
 const formatTime = (at: Date) => at.toLocaleString("en-ZA", { timeZone: "Africa/Johannesburg" });
 
-export function tenantConfirmationEmail(input: SignedEmailInput): MailMessage {
+// `documentFile` is the signed Lease Document Version's file, under public/.
+export function tenantConfirmationEmail(input: SignedEmailInput & { documentFile: string }): MailMessage {
   const name = escapeHtml(input.name);
   const phone = escapeHtml(input.phone);
   return {
@@ -58,7 +57,7 @@ export function tenantConfirmationEmail(input: SignedEmailInput): MailMessage {
           </div>
         </div>
       `,
-    attachments: [{ filename: "Lease_Agreement.pdf", path: LEASE_DOCUMENT_PATH }],
+    attachments: [{ filename: "Lease_Agreement.pdf", path: path.join(process.cwd(), "public", input.documentFile) }],
   };
 }
 

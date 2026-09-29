@@ -99,8 +99,8 @@ Run `npm run migrate-tenants -- --dry-run` first to see what it would do. It nee
 
 ### Key Design Decisions
 
-**Master PDF in Public Folder:**
-The lease document (`public/LEASE AGREEMENT updated.01.pdf`) is a static file in `public/`. This avoids Firebase Storage. The signing page offers it for download, and the Tenant's confirmation email attaches it.
+**Lease Document Versions in the public folder:**
+Each Lease Document Version is a static PDF in `public/lease-documents/`, listed with its change note and start date in `src/lib/lease/document-versions.ts` (ADR 0002). This avoids Firebase Storage. Each Lease records its `documentVersion`; a new Signing Link gets the newest version in effect, and Leases saved before versions existed count as Version 1. The signing page offers that Lease's version for download, and the Tenant's confirmation email attaches it. Versions are only ever added.
 
 **Signature stored as base64 in Firestore:**
 The signature is a PNG exported from the canvas as a data URL (base64 string) and saved directly in the Firestore document. Signature images are typically 20–50KB — well within Firestore's 1MB document limit. This completely removes the need for Firebase Storage.
@@ -168,10 +168,10 @@ src/components/
 - Idempotency: `useRef` lock prevents double-writes on rapid clicks
 
 ### `/lease/sign/[tenantId]`
-- On load: `GET /api/signing-links/{id}` returns only `open`, `not_found` or `already_signed`
+- On load: `GET /api/signing-links/{id}` returns `open` (with the Lease Document Version to offer), `not_found` or `already_signed`
   - `not_found` → "Link not found" screen
   - `already_signed` → "Already Signed" screen
-  - `open` → renders the form, with a download link for `LEASE AGREEMENT updated.01.pdf`
+  - `open` → renders the form, with a download link for that Lease's Lease Document Version
 - On submit:
   1. Checks fields and signature in the browser for quick feedback
   2. Exports signature as base64 from canvas

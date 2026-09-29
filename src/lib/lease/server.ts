@@ -1,5 +1,6 @@
 // Wires the Lease module to Firestore, Gmail and the system clock for Route Handlers.
 import { adminAuth, adminDb } from "@/lib/firebase-admin";
+import { LEASE_DOCUMENT_VERSIONS } from "./document-versions";
 import { createFirestoreStore } from "./firestore-store";
 import { createGmailMailer } from "./gmail-mailer";
 import { createLeaseModule, LeaseModule } from "./lease-module";
@@ -16,6 +17,7 @@ export function getLeaseModule(): LeaseModule {
     clock: { now: () => new Date() },
     landlordEmail: process.env.EMAIL_USER?.trim() ?? "",
     appUrl: process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
+    documentVersions: LEASE_DOCUMENT_VERSIONS,
   });
   return lease;
 }

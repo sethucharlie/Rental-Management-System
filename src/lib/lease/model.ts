@@ -32,9 +32,28 @@ export interface LeaseRecord {
   rent: number;
   startDate: string | null; // YYYY-MM-DD
   endDate: string | null; // YYYY-MM-DD
+  documentVersion: number; // the Lease Document Version it is signed on
   signature: LeaseSignature | null;
   createdAt: Date;
   legacyId?: string;
+}
+
+// One edition of the Lease Document's wording (ADR 0002). Versions are only ever added.
+export interface LeaseDocumentVersion {
+  version: number;
+  file: string; // path under public/
+  changeNote: string; // the landlord's short note of what it changed
+  effectiveFrom: string; // YYYY-MM-DD
+}
+
+// The newest version in effect on the given day. New Signing Links use it.
+export function latestDocumentVersion(
+  versions: readonly LeaseDocumentVersion[],
+  today: string,
+): LeaseDocumentVersion | null {
+  return versions
+    .filter((v) => v.effectiveFrom <= today)
+    .reduce<LeaseDocumentVersion | null>((latest, v) => (!latest || v.version > latest.version ? v : latest), null);
 }
 
 export type Stored<T> = T & { id: string };

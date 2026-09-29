@@ -73,7 +73,7 @@ src/
 └── types/
     └── index.ts                   # Tenant TypeScript interface
 public/
-└── LEASE AGREEMENT updated.01.pdf # The master PDF lease agreement served to tenants
+└── lease-documents/              # One PDF per Lease Document Version, listed in src/lib/lease/document-versions.ts
 ```
 
 ---
@@ -86,8 +86,8 @@ public/
   - **Firestore** enabled (test mode or with rules configured)
   - **Authentication** enabled with **Google** provider
 
-### 1. Upload your Lease Agreement PDF
-Drag and drop your lease agreement PDF into the `public/` folder and name it exactly `LEASE AGREEMENT updated.01.pdf`. This is the file that will be shown to tenants.
+### 1. Add your Lease Agreement PDF
+Put the lease PDF in `public/lease-documents/` and list it in `src/lib/lease/document-versions.ts`. New Signing Links use the newest version in effect. Never edit or remove an old version: signed Leases point to it.
 
 ### 2. Configure environment variables
 
@@ -128,7 +128,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 ### Tenant
 1. Opens the link in any browser
 2. Fills in their Full Name, Email, ID Number, and Phone Number
-3. **Downloads the `LEASE AGREEMENT updated.01.pdf` from the screen**
+3. **Downloads the lease PDF from the screen**
 4. Draws their signature on the canvas
 5. Enters their printed name and date
 6. Ticks the agreement checkbox
