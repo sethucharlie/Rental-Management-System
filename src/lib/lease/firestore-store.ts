@@ -119,6 +119,9 @@ function leaseFromDoc(id: string, d: DocumentData): Stored<LeaseRecord> {
     endDate: d.endDate ?? null,
     // Leases saved before versions existed were all signed on Version 1.
     documentVersion: typeof d.documentVersion === "number" ? d.documentVersion : 1,
+    newTenant: d.newTenant
+      ? { depositPaid: Number(d.newTenant.depositPaid) || 0, parkingReservation: d.newTenant.parkingReservation === true }
+      : null,
     signature: d.signature
       ? {
           image: d.signature.image ?? "",

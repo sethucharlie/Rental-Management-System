@@ -162,9 +162,10 @@ src/components/
 - Row actions: edit Tenant, view signature (`GET /api/leases/{id}/signature`), copy an unsigned Signing Link, delete
 
 ### `/dashboard/create-tenant`
-- Admin form: Unit Type, Unit Number, Rent
-- On submit: `POST /api/signing-links` with the landlord's Firebase ID token. The server checks the token carries the `landlord` claim and the fields are valid, then creates a Lease Awaiting Signature with no Tenant
+- Admin form: Unit Type, Unit Number, Rent, Deposit (pre-filled with the rent), Start Date and Parking Reservation. It shows the end date before submitting: 31 December, or 31 December of the next year for a start on or after 1 November
+- On submit: `POST /api/signing-links` with the landlord's Firebase ID token. The server checks the token carries the `landlord` claim and the fields are valid, then creates a Lease Awaiting Signature with no Tenant. The Lease holds its start and end dates, plus the Deposit and Parking Reservation to copy onto whoever signs. A Parking Reservation is refused when both bays are taken, counting Current Tenants' reservations and those promised by unsigned links
 - Returns a shareable URL: `{origin}/lease/sign/{docId}`
+- **Email Link**: `POST /api/signing-links/{id}/email` sends the link, unit, rent and lease dates to the address the landlord types
 - Idempotency: `useRef` lock prevents double-writes on rapid clicks
 
 ### `/lease/sign/[tenantId]`

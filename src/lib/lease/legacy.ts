@@ -42,6 +42,7 @@ export function planMigration(old: LegacyRecord, now: Date, today: string): Migr
     startDate: null,
     endDate: signed ? MIGRATED_LEASE_END : null,
     documentVersion: 1, // the only version before Renewals
+    newTenant: null,
     signature: signed
       ? {
           image: old.signatureBase64 ?? "",

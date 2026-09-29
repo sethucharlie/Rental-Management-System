@@ -33,9 +33,33 @@ export interface LeaseRecord {
   startDate: string | null; // YYYY-MM-DD
   endDate: string | null; // YYYY-MM-DD
   documentVersion: number; // the Lease Document Version it is signed on
+  // What the landlord set for whoever signs this first Lease. Copied onto the new Tenant
+  // at signing. null on a migrated Lease.
+  newTenant: NewTenantTerms | null;
   signature: LeaseSignature | null;
   createdAt: Date;
   legacyId?: string;
+}
+
+export interface NewTenantTerms {
+  depositPaid: number;
+  parkingReservation: boolean;
+}
+
+export const PARKING_BAYS = 2;
+
+// A first Lease ends on 31 December, or on 31 December of the next year if it starts
+// on or after 1 November. Takes and gives YYYY-MM-DD.
+export function firstLeaseEndDate(startDate: string): string {
+  const year = Number(startDate.slice(0, 4));
+  const month = Number(startDate.slice(5, 7));
+  return `${month >= 11 ? year + 1 : year}-12-31`;
+}
+
+export function isRealDate(date: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  const parsed = new Date(`${date}T00:00:00Z`);
+  return !isNaN(parsed.getTime()) && parsed.toISOString().startsWith(date);
 }
 
 // One edition of the Lease Document's wording (ADR 0002). Versions are only ever added.
@@ -78,10 +102,7 @@ export function dateOfBirthFromSAId(idNumber: string, today: string): string | n
   const [, yy, mm, dd] = match;
   let date = `20${yy}-${mm}-${dd}`;
   if (date > today) date = `19${yy}-${mm}-${dd}`;
-
-  const parsed = new Date(`${date}T00:00:00Z`);
-  const isRealDate = !isNaN(parsed.getTime()) && parsed.toISOString().startsWith(date);
-  return isRealDate ? date : null;
+  return isRealDate(date) ? date : null;
 }
 
 // The newest Lease is the current one.
