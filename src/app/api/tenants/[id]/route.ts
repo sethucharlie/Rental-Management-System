@@ -3,7 +3,7 @@ import { getLeaseModule, isLandlordRequest } from "@/lib/lease/server";
 
 const HTTP_STATUS = { saved: 200, deleted: 200, invalid: 400, not_found: 404 } as const;
 
-// The landlord edits a Tenant's details or moves them out.
+// The landlord edits a Tenant's details, Deposit and Parking Reservation, or moves them out.
 export async function PATCH(request: NextRequest, ctx: RouteContext<"/api/tenants/[id]">) {
   if (!(await isLandlordRequest(request))) {
     return NextResponse.json({ error: "Not signed in as the landlord" }, { status: 401 });
@@ -18,6 +18,11 @@ export async function PATCH(request: NextRequest, ctx: RouteContext<"/api/tenant
       identityNumber: text("identityNumber"),
       phone: text("phone"),
       state: body?.state,
+      depositPaid: typeof body?.depositPaid === "string" ? body.depositPaid : undefined,
+      parkingReservation:
+        typeof body?.parkingReservation === "boolean" || body?.parkingReservation === null
+          ? body.parkingReservation
+          : undefined,
     });
     return NextResponse.json(outcome, { status: HTTP_STATUS[outcome.status] });
   } catch (err) {

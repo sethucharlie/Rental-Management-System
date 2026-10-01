@@ -658,6 +658,111 @@ describe("First-Lease form", () => {
   });
 });
 
+describe("Deposit and Parking Reservations on the dashboard", () => {
+  let lease: LeaseModule;
+  let store: MemoryStore;
+  let count = 0;
+
+  // Signs a first Lease for a new Tenant and returns their id.
+  const tenant = async (name: string, parkingReservation = false) => {
+    const { id } = await lease.createSigningLink({
+      unitType: "Flat",
+      unitNumber: String(++count),
+      rent: "1500",
+      ...firstLeaseTerms,
+      parkingReservation,
+    });
+    await lease.signLease(id, { ...validSubmission, fullName: name });
+    return (await store.listTenants()).find((t) => t.name === name)!.id;
+  };
+  const edit = (id: string, changes: object) =>
+    lease.updateTenant(id, { ...tenantDetails, state: "current", ...changes });
+
+  beforeEach(() => {
+    store = createMemoryStore();
+    lease = createLeaseModule({
+      store,
+      mailer: createFakeMailer(),
+      clock: fixedClock(new Date("2026-10-05T09:00:00Z")),
+      landlordEmail: "landlord@example.com",
+      appUrl: "https://lease.example.com",
+      documentVersions: [versionOne],
+    });
+  });
+
+  it("records and changes the Deposit paid", async () => {
+    const id = await tenant("Thandi Mokoena");
+
+    expect(await edit(id, { depositPaid: "1400" })).toEqual({ status: "saved" });
+    expect(await store.getTenant(id)).toMatchObject({ depositPaid: 1400 });
+    expect(await edit(id, { depositPaid: "1500" })).toEqual({ status: "saved" });
+    expect(await store.getTenant(id)).toMatchObject({ depositPaid: 1500 });
+  });
+
+  it.each(["-1", "abc"])("refuses a Deposit of %j", async (depositPaid) => {
+    const id = await tenant("Thandi Mokoena");
+
+    expect(await edit(id, { depositPaid })).toEqual({ status: "invalid", error: "Deposit must be a number, zero or more." });
+  });
+
+  it("leaves the Deposit and parking alone when an edit does not mention them", async () => {
+    const id = await tenant("Thandi Mokoena", true);
+
+    await edit(id, { phone: "0839876543" });
+    expect(await store.getTenant(id)).toMatchObject({ depositPaid: 1500, parkingReservation: true });
+  });
+
+  it("grants and ends a Parking Reservation", async () => {
+    const id = await tenant("Thandi Mokoena");
+
+    await edit(id, { parkingReservation: true });
+    expect(await store.getTenant(id)).toMatchObject({ parkingReservation: true });
+    await edit(id, { parkingReservation: false });
+    expect(await store.getTenant(id)).toMatchObject({ parkingReservation: false });
+  });
+
+  it("refuses a third Parking Reservation, counting a bay promised to an unsigned link", async () => {
+    await tenant("Thandi Mokoena", true);
+    await lease.createSigningLink({ unitType: "Flat", unitNumber: "9", rent: "1500", ...firstLeaseTerms, parkingReservation: true });
+    const third = await tenant("Sipho Dlamini");
+
+    expect(await edit(third, { parkingReservation: true })).toEqual({
+      status: "invalid",
+      error: "Both Parking Bays are already reserved.",
+    });
+    expect(await store.getTenant(third)).toMatchObject({ parkingReservation: false });
+  });
+
+  it("lets a holder save their details while both bays are reserved", async () => {
+    const id = await tenant("Thandi Mokoena", true);
+    await tenant("Sipho Dlamini", true);
+
+    expect(await edit(id, { parkingReservation: true, phone: "0839876543" })).toEqual({ status: "saved" });
+  });
+
+  it("ends the Parking Reservation and frees the bay when a Tenant moves out", async () => {
+    const first = await tenant("Thandi Mokoena", true);
+    await tenant("Sipho Dlamini", true);
+    const third = await tenant("Lerato Khumalo");
+
+    await edit(first, { state: "moved_out", parkingReservation: true });
+    expect(await store.getTenant(first)).toMatchObject({ state: "moved_out", parkingReservation: false });
+    expect(await edit(third, { parkingReservation: true })).toEqual({ status: "saved" });
+  });
+
+  it("shows how many bays are reserved and by whom", async () => {
+    await tenant("Thandi Mokoena", true);
+    await tenant("Sipho Dlamini");
+    await lease.createSigningLink({ unitType: "Flat", unitNumber: "9", rent: "1500", ...firstLeaseTerms, parkingReservation: true });
+
+    expect(await lease.parkingSummary()).toEqual({
+      bays: 2,
+      holders: [expect.objectContaining({ name: "Thandi Mokoena" })],
+      promisedToUnsignedLinks: 1,
+    });
+  });
+});
+
 describe("Renewal", () => {
   let lease: LeaseModule;
   let store: MemoryStore;

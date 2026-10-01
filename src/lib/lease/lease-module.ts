@@ -37,6 +37,7 @@ import {
   LeaseScheduleView,
   LeaseView,
   MigrationReport,
+  ParkingView,
   RenewalTenantView,
   SignatureView,
   TenantView,
@@ -68,8 +69,12 @@ export interface NewRenewalLink {
   rent: string;
 }
 
+// Left out, the Deposit and Parking Reservation stay as they are. A blank Deposit means
+// not recorded.
 export interface TenantChanges extends TenantDetailsFields {
   state: TenantState;
+  depositPaid?: string;
+  parkingReservation?: boolean | null;
 }
 
 export class InvalidSigningLinkError extends Error {}
@@ -359,6 +364,18 @@ export function createLeaseModule({ store, mailer, clock, landlordEmail, appUrl,
       return [...tenantRows, ...unsignedRows];
     },
 
+    // Who holds the two Parking Bays, and how many are promised to unsigned first Leases.
+    async parkingSummary(): Promise<ParkingView> {
+      const [tenants, leases] = await Promise.all([store.listTenants(), store.listLeases()]);
+      return {
+        bays: PARKING_BAYS,
+        holders: tenants
+          .filter((t) => t.state === "current" && t.parkingReservation === true)
+          .map((t) => ({ tenantId: t.id, name: t.name })),
+        promisedToUnsignedLinks: leases.filter((l) => l.tenantId === null && l.newTenant?.parkingReservation).length,
+      };
+    },
+
     async getSignature(leaseId: string): Promise<SignatureView | null> {
       const signature = (await store.getLease(leaseId))?.signature;
       return signature ? { image: signature.image, printedName: signature.printedName, dateSigned: signature.dateSigned } : null;
@@ -373,9 +390,29 @@ export function createLeaseModule({ store, mailer, clock, landlordEmail, appUrl,
       const error = findTenantDetailsError(changes, tenant.identityNumberType);
       if (error) return { status: "invalid", error };
 
-      const identityNumber = changes.identityNumber.trim();
+      let depositPaid = tenant.depositPaid;
+      if (changes.depositPaid !== undefined) {
+        const deposit = changes.depositPaid.trim();
+        if (deposit !== "" && !(Number(deposit) >= 0)) {
+          return { status: "invalid", error: "Deposit must be a number, zero or more." };
+        }
+        depositPaid = deposit === "" ? null : Number(deposit);
+      }
+
       const movingOut = changes.state === "moved_out";
+      let parkingReservation =
+        changes.parkingReservation === undefined ? tenant.parkingReservation : changes.parkingReservation;
+      // Moving out ends a Parking Reservation.
+      if (movingOut && parkingReservation) parkingReservation = false;
+      const holdsBay = tenant.state === "current" && tenant.parkingReservation === true;
+      if (parkingReservation && !holdsBay && (await reservedBays()) >= PARKING_BAYS) {
+        return { status: "invalid", error: "Both Parking Bays are already reserved." };
+      }
+
+      const identityNumber = changes.identityNumber.trim();
       await store.updateTenant(id, {
+        depositPaid,
+        parkingReservation,
         name: changes.name.trim(),
         email: changes.email.trim(),
         phone: changes.phone.trim(),

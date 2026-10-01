@@ -60,6 +60,14 @@ export interface LeaseScheduleView {
   deposit: number | null;
 }
 
+// The Parking Bays: the Current Tenants holding a Parking Reservation, and how many bays
+// are promised to first Leases nobody has signed yet.
+export interface ParkingView {
+  bays: number;
+  holders: { tenantId: string; name: string }[];
+  promisedToUnsignedLinks: number;
+}
+
 // What a Renewal page pre-fills for the Tenant to check, once they give their Identity Number.
 export interface RenewalTenantView {
   name: string;

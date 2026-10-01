@@ -10,7 +10,12 @@ export interface TenantChanges {
   identityNumber: string;
   phone: string;
   state: TenantState;
+  depositPaid: string; // blank means not recorded
+  parkingReservation: boolean | null; // null means not recorded
 }
+
+const PARKING_CHOICE = { '': null, yes: true, no: false } as const;
+const parkingChoice = (reservation: boolean | null) => (reservation === null ? '' : reservation ? 'yes' : 'no');
 
 interface EditTenantModalProps {
   tenant: TenantView | null;
@@ -19,15 +24,18 @@ interface EditTenantModalProps {
   onSave: (tenantId: string, changes: TenantChanges) => Promise<void>;
 }
 
-// Edits the Tenant's own details. Unit and rent belong to the Lease, so they are not here.
-// The page gives it a `key` per Tenant, so it starts fresh for each one.
+// Edits the Tenant's own details, Deposit and Parking Reservation. Unit and rent belong to
+// the Lease, so they are not here. The page gives it a `key` per Tenant, so it starts fresh
+// for each one.
 export default function EditTenantModal({ tenant, isOpen, onClose, onSave }: EditTenantModalProps) {
-  const [formData, setFormData] = useState<TenantChanges>({
+  const [formData, setFormData] = useState({
     name: tenant?.name ?? '',
     email: tenant?.email ?? '',
     identityNumber: tenant?.identityNumber ?? '',
     phone: tenant?.phone ?? '',
     state: tenant?.state ?? 'current',
+    depositPaid: tenant?.depositPaid === null || tenant?.depositPaid === undefined ? '' : String(tenant.depositPaid),
+    parking: parkingChoice(tenant?.parkingReservation ?? null) as keyof typeof PARKING_CHOICE,
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -44,7 +52,8 @@ export default function EditTenantModal({ tenant, isOpen, onClose, onSave }: Edi
     setLoading(true);
     setError('');
     try {
-      await onSave(tenant.id, formData);
+      const { parking, ...details } = formData;
+      await onSave(tenant.id, { ...details, parkingReservation: PARKING_CHOICE[parking] });
       onClose();
     } catch (err) {
       setError(errorMessage(err, 'Failed to save tenant'));
@@ -87,6 +96,23 @@ export default function EditTenantModal({ tenant, isOpen, onClose, onSave }: Edi
             <div className="flex items-end gap-4">
               <label className="text-sm font-medium whitespace-nowrap pb-1">Email</label>
               <input type="email" name="email" value={formData.email} onChange={handleChange} required className="flex-1 min-w-0 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none" />
+            </div>
+
+            <div className="flex items-end gap-4">
+              <label htmlFor="editDepositPaid" className="text-sm font-medium whitespace-nowrap pb-1">Deposit Paid</label>
+              <div className="flex-1 min-w-0 relative">
+                <span className="absolute left-1 bottom-1 text-lg">R</span>
+                <input type="number" id="editDepositPaid" name="depositPaid" min="0" value={formData.depositPaid} onChange={handleChange} placeholder="Not recorded" className="w-full border-b-2 border-black focus:outline-none bg-transparent pb-1 pl-5 pr-1 text-lg rounded-none" />
+              </div>
+            </div>
+
+            <div className="flex items-end gap-4">
+              <label htmlFor="editParking" className="text-sm font-medium whitespace-nowrap pb-1">Parking Reservation</label>
+              <select id="editParking" name="parking" value={formData.parking} onChange={handleChange} className="flex-1 min-w-0 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none appearance-none cursor-pointer">
+                {formData.parking === '' && <option value="">Not recorded</option>}
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
             </div>
 
             <div className="flex items-end gap-4 md:col-span-2">
