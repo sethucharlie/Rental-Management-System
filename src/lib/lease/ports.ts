@@ -1,7 +1,7 @@
 // The Lease module talks to the outside world only through these ports.
 // Production wires Firestore, Gmail and the system clock; tests wire fakes.
 import { LegacyRecord, MigrationStep } from "./legacy";
-import { CarDeclaration, LeaseRecord, LeaseSignature, Stored, TenantRecord } from "./model";
+import { CarDeclaration, IdentityGuard, LeaseRecord, LeaseSignature, Stored, TenantRecord } from "./model";
 
 export type SignResult = "signed" | "already_signed" | "not_found";
 
@@ -17,6 +17,15 @@ export interface LeaseStore {
     tenant: TenantRecord,
     signing: { carDeclaration: CarDeclaration; signature: LeaseSignature },
   ): Promise<SignResult>;
+  // In one atomic step, and only if the Renewal is not signed yet: apply the changes to
+  // the Lease's Tenant and save the Car Declaration and signature.
+  signRenewal(
+    leaseId: string,
+    tenantChanges: Partial<TenantRecord>,
+    signing: { carDeclaration: CarDeclaration; signature: LeaseSignature },
+  ): Promise<SignResult>;
+  // In one atomic step: save what `next` makes of the Lease's identity guard.
+  updateIdentityGuard(leaseId: string, next: (guard: IdentityGuard) => IdentityGuard): Promise<void>;
 
   getTenant(id: string): Promise<Stored<TenantRecord> | null>;
   listTenants(): Promise<Stored<TenantRecord>[]>;

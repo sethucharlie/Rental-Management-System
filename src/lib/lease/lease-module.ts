@@ -7,13 +7,19 @@ import {
   dateInSouthAfrica,
   dateOfBirthFromSAId,
   firstLeaseEndDate,
+  IDENTITY_BLOCK_MINUTES,
+  isInRenewalWindow,
   isRealDate,
   latestDocumentVersion,
   LeaseDocumentVersion,
   LeaseRecord,
   leaseState,
+  MAX_IDENTITY_TRIES,
   needsDepositAndParking,
+  openRenewal,
   PARKING_BAYS,
+  renewalPeriod,
+  sameIdentityNumber,
   Stored,
   TenantRecord,
   TenantState,
@@ -31,6 +37,7 @@ import {
   LeaseScheduleView,
   LeaseView,
   MigrationReport,
+  RenewalTenantView,
   SignatureView,
   TenantView,
 } from "./views";
@@ -54,14 +61,30 @@ export interface NewSigningLink {
   parkingReservation: boolean;
 }
 
+// The unit and rent the landlord sets for a Tenant's Renewal.
+export interface NewRenewalLink {
+  unitType: string;
+  unitNumber: string;
+  rent: string;
+}
+
 export interface TenantChanges extends TenantDetailsFields {
   state: TenantState;
 }
 
 export class InvalidSigningLinkError extends Error {}
 
+// A Renewal opens only once the Tenant gives their Identity Number.
 export type OpenResult =
   | { status: "open"; document: DocumentView; schedule: LeaseScheduleView }
+  | { status: "identity_required" }
+  | { status: "not_found" }
+  | { status: "already_signed" };
+
+export type IdentityCheckResult =
+  | { status: "open"; document: DocumentView; schedule: LeaseScheduleView; tenant: RenewalTenantView }
+  | { status: "wrong_identity" }
+  | { status: "blocked" }
   | { status: "not_found" }
   | { status: "already_signed" };
 
@@ -85,11 +108,93 @@ export function createLeaseModule({ store, mailer, clock, landlordEmail, appUrl,
 
   const signingLinkUrl = (id: string) => `${appUrl}/lease/sign/${encodeURIComponent(id)}`;
 
+  // Compares the Identity Number entered on a Renewal Signing Link with the Tenant's.
+  // After MAX_IDENTITY_TRIES wrong ones the link refuses every try, right or wrong,
+  // for IDENTITY_BLOCK_MINUTES.
+  const checkIdentity = async (
+    lease: Stored<LeaseRecord>,
+    tenant: TenantRecord,
+    entered: string,
+  ): Promise<"match" | "wrong_identity" | "blocked"> => {
+    const now = clock.now();
+    const blockedUntil = lease.identityGuard?.blockedUntil;
+    if (blockedUntil && now < blockedUntil) return "blocked";
+
+    if (sameIdentityNumber(entered, tenant.identityNumber)) {
+      if (lease.identityGuard?.failures) await store.updateIdentityGuard(lease.id, () => ({ failures: 0, blockedUntil: null }));
+      return "match";
+    }
+    await store.updateIdentityGuard(lease.id, ({ failures }) =>
+      failures + 1 >= MAX_IDENTITY_TRIES
+        ? { failures: 0, blockedUntil: new Date(now.getTime() + IDENTITY_BLOCK_MINUTES * 60_000) }
+        : { failures: failures + 1, blockedUntil: null },
+    );
+    return "wrong_identity";
+  };
+
+  // A Renewal's Lease and Tenant, or null if either is gone.
+  const findRenewal = async (id: string) => {
+    const lease = await store.getLease(id);
+    if (!lease?.renews || !lease.tenantId) return null;
+    const tenant = await store.getTenant(lease.tenantId);
+    return tenant && { lease, tenant };
+  };
+
+  const sendSigningEmails = async (lease: LeaseRecord, submission: Submission, signedAt: Date) => {
+    const email = { ...submission, name: submission.fullName, signedAt, landlordEmail, appUrl };
+    try {
+      const documentFile = documentVersion(lease.documentVersion).file;
+      await mailer.send(tenantConfirmationEmail({ ...email, documentFile }));
+      await mailer.send(landlordNoticeEmail(email));
+    } catch (err) {
+      // The Lease is signed either way; a lost email must not undo it.
+      console.error("Failed to send signing emails", err);
+    }
+  };
+
+  // The server keeps no session, so the submission's Identity Number must match again.
+  // The Identity Number itself never changes here; the landlord corrects it if needed.
+  const signRenewal = async (lease: Stored<LeaseRecord>, submission: Submission): Promise<SignOutcome> => {
+    if (lease.signature) return { status: "already_signed" };
+    const tenant = lease.tenantId ? await store.getTenant(lease.tenantId) : null;
+    if (!tenant) return { status: "not_found" };
+
+    const check = await checkIdentity(lease, tenant, submission.idNumber);
+    if (check !== "match") return { status: check };
+
+    const signedAt = clock.now();
+    const passport = tenant.identityNumberType === "passport";
+    const fields = { ...submission, identityType: tenant.identityNumberType, idNumber: tenant.identityNumber };
+    const error = findSubmissionError(fields, dateInSouthAfrica(signedAt));
+    if (error) return { status: "invalid", error };
+
+    const status = await store.signRenewal(
+      lease.id,
+      {
+        name: submission.fullName.trim(),
+        email: submission.email.trim(),
+        phone: submission.phone,
+        ...(passport ? { passportCountry: submission.passportCountry.trim(), dateOfBirth: submission.dateOfBirth } : {}),
+        // "No car" ends a Parking Reservation; "car" leaves it as it was.
+        ...(submission.carDeclaration === "no_car" ? { parkingReservation: false } : {}),
+      },
+      {
+        carDeclaration: submission.carDeclaration as CarDeclaration,
+        signature: {
+          image: submission.signatureBase64,
+          printedName: submission.signatureName,
+          dateSigned: submission.signatureDate,
+          signedAt,
+        },
+      },
+    );
+    if (status === "signed") await sendSigningEmails(lease, submission, signedAt);
+    return { status };
+  };
+
   return {
     async createSigningLink(input: NewSigningLink): Promise<{ id: string }> {
-      if (!["Flat", "House"].includes(input.unitType)) throw new InvalidSigningLinkError("Unit type must be Flat or House.");
-      if (!input.unitNumber?.trim()) throw new InvalidSigningLinkError("Please enter a unit number.");
-      if (!(Number(input.rent) > 0)) throw new InvalidSigningLinkError("Rent must be a number above zero.");
+      checkUnitAndRent(input);
       if (!isRealDate(input.startDate)) throw new InvalidSigningLinkError("Please enter a start date.");
       if (input.deposit?.trim() === "" || !(Number(input.deposit) >= 0)) {
         throw new InvalidSigningLinkError("Deposit must be a number, zero or more.");
@@ -110,11 +215,52 @@ export function createLeaseModule({ store, mailer, clock, landlordEmail, appUrl,
         endDate: firstLeaseEndDate(input.startDate),
         documentVersion: document.version,
         newTenant: { depositPaid: Number(input.deposit), parkingReservation: input.parkingReservation === true },
+        renews: null,
         carDeclaration: null,
         signature: null,
         createdAt: clock.now(),
       });
       return { id };
+    },
+
+    // A Renewal for the Lease Year after the Tenant's current Lease, on the latest Lease
+    // Document Version. The Tenant and their Deposit stay as they are. Outside the
+    // Renewal window the landlord is warned, not stopped.
+    async createRenewalLink(
+      tenantId: string,
+      input: NewRenewalLink,
+    ): Promise<{ id: string; outsideRenewalWindow: boolean }> {
+      checkUnitAndRent(input);
+      const tenant = await store.getTenant(tenantId);
+      if (!tenant) throw new InvalidSigningLinkError("This Tenant no longer exists.");
+      if (tenant.state !== "current") throw new InvalidSigningLinkError("Only a Current Tenant can be offered a Renewal.");
+
+      const leases = (await store.listLeases()).filter((l) => l.tenantId === tenantId);
+      if (openRenewal(leases)) {
+        throw new InvalidSigningLinkError("This Tenant already has a Renewal Signing Link. Delete it to make a new one.");
+      }
+      const current = currentLease(leases);
+      if (!current?.signature || !current.endDate) {
+        throw new InvalidSigningLinkError("This Tenant has no signed Lease with an end date to renew.");
+      }
+
+      const document = latestDocumentVersion(documentVersions, today());
+      if (!document) throw new Error("No Lease Document Version is in effect yet.");
+
+      const id = await store.createLease({
+        tenantId,
+        unitType: input.unitType,
+        unitNumber: input.unitNumber.trim(),
+        rent: Number(input.rent),
+        ...renewalPeriod(current.endDate),
+        documentVersion: document.version,
+        newTenant: null,
+        renews: current.id,
+        carDeclaration: null,
+        signature: null,
+        createdAt: clock.now(),
+      });
+      return { id, outsideRenewalWindow: !isInRenewalWindow(today()) };
     },
 
     // The landlord sends an unsigned Signing Link to the Tenant by email.
@@ -134,6 +280,7 @@ export function createLeaseModule({ store, mailer, clock, landlordEmail, appUrl,
       const lease = await store.getLease(id);
       if (!lease) return { status: "not_found" };
       if (lease.signature) return { status: "already_signed" };
+      if (lease.renews) return { status: "identity_required" };
       return {
         status: "open",
         document: documentView(documentVersion(lease.documentVersion)),
@@ -141,13 +288,31 @@ export function createLeaseModule({ store, mailer, clock, landlordEmail, appUrl,
       };
     },
 
+    // Only the Tenant's full Identity Number opens a Renewal and shows their details.
+    async checkRenewalIdentity(id: string, identityNumber: string): Promise<IdentityCheckResult> {
+      const renewal = await findRenewal(id);
+      if (!renewal) return { status: "not_found" };
+      const { lease, tenant } = renewal;
+      if (lease.signature) return { status: "already_signed" };
+
+      const check = await checkIdentity(lease, tenant, identityNumber);
+      if (check !== "match") return { status: check };
+      return {
+        status: "open",
+        document: documentView(documentVersion(lease.documentVersion)),
+        schedule: { ...scheduleView(lease), deposit: tenant.depositPaid },
+        tenant: renewalTenantView(tenant),
+      };
+    },
+
     async signLease(id: string, submission: Submission): Promise<SignOutcome> {
+      const lease = await store.getLease(id);
+      if (lease?.renews) return signRenewal(lease, submission);
+
       const signedAt = clock.now();
       const signedOn = dateInSouthAfrica(signedAt);
       const error = findSubmissionError(submission, signedOn);
       if (error) return { status: "invalid", error };
-
-      const lease = await store.getLease(id);
       if (!lease) return { status: "not_found" };
 
       const passport = submission.identityType === "passport";
@@ -174,17 +339,7 @@ export function createLeaseModule({ store, mailer, clock, landlordEmail, appUrl,
         },
       });
 
-      if (status === "signed") {
-        const email = { ...submission, name: submission.fullName, signedAt, landlordEmail, appUrl };
-        try {
-          const documentFile = documentVersion(lease.documentVersion).file;
-          await mailer.send(tenantConfirmationEmail({ ...email, documentFile }));
-          await mailer.send(landlordNoticeEmail(email));
-        } catch (err) {
-          // The Lease is signed either way; a lost email must not undo it.
-          console.error("Failed to send signing emails", err);
-        }
-      }
+      if (status === "signed") await sendSigningEmails(lease, submission, signedAt);
       return { status };
     },
 
@@ -195,11 +350,12 @@ export function createLeaseModule({ store, mailer, clock, landlordEmail, appUrl,
 
       const tenantRows = tenants.map((t) => {
         const lease = currentLease(leasesOf(t.id));
-        return { tenant: tenantView(t), lease: lease && leaseView(lease, now) };
+        const renewal = openRenewal(leasesOf(t.id));
+        return { tenant: tenantView(t), lease: lease && leaseView(lease, now), renewal: renewal && leaseView(renewal, now) };
       });
       const unsignedRows = leases
         .filter((l) => l.tenantId === null)
-        .map((l) => ({ tenant: null, lease: leaseView(l, now) }));
+        .map((l) => ({ tenant: null, lease: leaseView(l, now), renewal: null }));
       return [...tenantRows, ...unsignedRows];
     },
 
@@ -239,11 +395,11 @@ export function createLeaseModule({ store, mailer, clock, landlordEmail, appUrl,
       return { status: "deleted" };
     },
 
-    // Only a first Lease nobody has signed; a signed Lease goes with its Tenant.
+    // Only a Lease nobody has signed; a signed Lease goes with its Tenant.
     async deleteSigningLink(id: string): Promise<DeleteOutcome> {
       const lease = await store.getLease(id);
       if (!lease) return { status: "not_found" };
-      if (lease.signature || lease.tenantId) return { status: "signed" };
+      if (lease.signature || (lease.tenantId && !lease.renews)) return { status: "signed" };
       await store.deleteLease(id);
       return { status: "deleted" };
     },
@@ -266,6 +422,25 @@ export function createLeaseModule({ store, mailer, clock, landlordEmail, appUrl,
       }
       return report;
     },
+  };
+}
+
+function checkUnitAndRent(input: { unitType: string; unitNumber: string; rent: string }) {
+  if (!["Flat", "House"].includes(input.unitType)) throw new InvalidSigningLinkError("Unit type must be Flat or House.");
+  if (!input.unitNumber?.trim()) throw new InvalidSigningLinkError("Please enter a unit number.");
+  if (!(Number(input.rent) > 0)) throw new InvalidSigningLinkError("Rent must be a number above zero.");
+}
+
+function renewalTenantView(t: TenantRecord): RenewalTenantView {
+  return {
+    name: t.name,
+    email: t.email,
+    phone: t.phone,
+    identityNumberType: t.identityNumberType,
+    identityNumber: t.identityNumber,
+    passportCountry: t.passportCountry,
+    dateOfBirth: t.dateOfBirth,
+    parkingReservation: t.parkingReservation === true,
   };
 }
 
@@ -325,7 +500,11 @@ export type EmailLinkOutcome =
   | { status: "already_signed" }
   | { status: "invalid"; error: string };
 
-export type SignOutcome ={ status: SignResult } | { status: "invalid"; error: string };
+export type SignOutcome =
+  | { status: SignResult }
+  | { status: "invalid"; error: string }
+  | { status: "wrong_identity" }
+  | { status: "blocked" };
 
 export type UpdateOutcome = { status: "saved" } | { status: "not_found" } | { status: "invalid"; error: string };
 

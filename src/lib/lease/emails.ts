@@ -30,13 +30,14 @@ interface SigningLinkEmailInput {
 export function signingLinkEmail({ to, url, lease, landlordEmail }: SigningLinkEmailInput): MailMessage {
   const period =
     lease.startDate && lease.endDate ? `${formatDate(lease.startDate)} to ${formatDate(lease.endDate)}` : "as agreed";
+  const renewal = lease.renews !== null;
   return {
     from: `"Lease Agreements" <${landlordEmail}>`,
     to,
-    subject: "Your lease agreement is ready to sign",
+    subject: renewal ? "Your lease renewal is ready to sign" : "Your lease agreement is ready to sign",
     html: `
         <div style="font-family: sans-serif; max-w: 600px; margin: 0 auto;">
-          <h2 style="color: #000;">Your lease is ready to sign</h2>
+          <h2 style="color: #000;">${renewal ? "Your lease renewal" : "Your lease"} is ready to sign</h2>
           <p>Please read the lease and sign it online at this link:</p>
           <p><a href="${escapeHtml(url)}">${escapeHtml(url)}</a></p>
           <ul>
@@ -44,6 +45,7 @@ export function signingLinkEmail({ to, url, lease, landlordEmail }: SigningLinkE
             <li>Rent: R${lease.rent} a month</li>
             <li>Lease: ${period}</li>
           </ul>
+          ${renewal ? "<p>To open it, you will need the ID or passport number you gave when you first signed.</p>" : ""}
           <p>The link is for you alone. Please do not share it.</p>
         </div>
       `,

@@ -6,7 +6,7 @@ import { Download } from "lucide-react";
 import SignaturePad, { SignaturePadRef } from "@/components/SignaturePad";
 import { dateInSouthAfrica } from "@/lib/lease/model";
 import { findSubmissionError } from "@/lib/lease/validation";
-import type { DocumentView, LeaseScheduleView } from "@/lib/lease/views";
+import type { DocumentView, LeaseScheduleView, RenewalTenantView } from "@/lib/lease/views";
 
 const INPUT_CLASS = "flex-1 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none w-full min-w-0";
 
@@ -29,6 +29,11 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
   const [leaseDocument, setLeaseDocument] = useState<DocumentView | null>(null);
   const [schedule, setSchedule] = useState<LeaseScheduleView | null>(null);
   const [showPopia, setShowPopia] = useState(true);
+  // A Renewal opens only after the Tenant gives the Identity Number on record.
+  const [identityRequired, setIdentityRequired] = useState(false);
+  const [identityInput, setIdentityInput] = useState("");
+  const [checkingIdentity, setCheckingIdentity] = useState(false);
+  const [renewalTenant, setRenewalTenant] = useState<RenewalTenantView | null>(null);
 
   const [formData, setFormData] = useState({
     fullName: "",
@@ -57,6 +62,8 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
           setDocExists(false);
         } else if (result.status === "already_signed") {
           setAlreadySigned(true);
+        } else if (result.status === "identity_required") {
+          setIdentityRequired(true);
         } else {
           setLeaseDocument(result.document);
           setSchedule(result.schedule);
@@ -72,6 +79,59 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
   }, [tenantId]);
 
   const passport = formData.identityType === "passport";
+  const renewal = renewalTenant !== null;
+
+  const handleIdentitySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setCheckingIdentity(true);
+    try {
+      const res = await fetch(`/api/signing-links/${encodeURIComponent(tenantId)}/identity`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identityNumber: identityInput }),
+      });
+      const result = await res.json();
+      switch (result.status) {
+        case "open": {
+          const tenant: RenewalTenantView = result.tenant;
+          setLeaseDocument(result.document);
+          setSchedule(result.schedule);
+          setRenewalTenant(tenant);
+          setFormData((prev) => ({
+            ...prev,
+            fullName: tenant.name,
+            email: tenant.email,
+            identityType: tenant.identityNumberType,
+            idNumber: tenant.identityNumber,
+            passportCountry: tenant.passportCountry ?? "",
+            dateOfBirth: tenant.dateOfBirth ?? "",
+            phone: tenant.phone,
+          }));
+          setIdentityRequired(false);
+          break;
+        }
+        case "wrong_identity":
+          setError("That number does not match our records. Please check it and try again.");
+          break;
+        case "blocked":
+          setError("Too many wrong tries. Please wait 15 minutes and try again.");
+          break;
+        case "already_signed":
+          setAlreadySigned(true);
+          break;
+        case "not_found":
+          setDocExists(false);
+          break;
+        default:
+          throw new Error(result.error);
+      }
+    } catch {
+      setError("An unexpected error occurred. Please try again.");
+    } finally {
+      setCheckingIdentity(false);
+    }
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -112,6 +172,9 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
         setAlreadySigned(true);
         return;
       }
+      if (outcome.status === "blocked") {
+        throw new Error("Too many wrong tries. Please wait 15 minutes and try again.");
+      }
       if (outcome.status !== "signed") {
         throw new Error(outcome.error || "An unexpected error occurred. Please try again.");
       }
@@ -146,6 +209,41 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
           <h1 className="text-2xl font-medium tracking-wide uppercase mb-4">Already Signed</h1>
           <p className="text-gray-500">This lease agreement has already been signed and submitted.</p>
         </div>
+      </div>
+    );
+  }
+
+  if (identityRequired) {
+    return (
+      <div className="min-h-screen bg-white text-black py-12 px-6 flex items-center justify-center font-sans">
+        <form onSubmit={handleIdentitySubmit} className="max-w-md w-full space-y-8">
+          <div>
+            <h1 className="text-3xl font-light tracking-tight mb-2 uppercase">Lease Renewal</h1>
+            <p className="text-gray-500 text-sm">
+              To open your renewal, enter the South African ID number or passport number you gave when you first signed.
+            </p>
+          </div>
+          {error && <div className="bg-red-50 text-red-600 p-4 border border-red-200 text-sm font-medium">{error}</div>}
+          <div className="flex items-end gap-4">
+            <label htmlFor="identityNumber" className="text-sm font-medium whitespace-nowrap pb-1">ID or Passport No.</label>
+            <input
+              type="text"
+              id="identityNumber"
+              value={identityInput}
+              onChange={(e) => setIdentityInput(e.target.value)}
+              required
+              autoComplete="off"
+              className={INPUT_CLASS}
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={checkingIdentity}
+            className="w-full bg-black text-white py-4 text-sm font-bold uppercase tracking-widest hover:bg-gray-800 transition-colors disabled:opacity-50"
+          >
+            {checkingIdentity ? "Checking..." : "Continue"}
+          </button>
+        </form>
       </div>
     );
   }
@@ -194,8 +292,12 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
 
       <div className="max-w-3xl mx-auto">
         <div className="mb-12 text-center md:text-left">
-          <h1 className="text-4xl font-light tracking-tight mb-2 uppercase">Lease Agreement</h1>
-          <p className="text-gray-500 text-sm">Please review the lease terms carefully, fill in your details, and sign below.</p>
+          <h1 className="text-4xl font-light tracking-tight mb-2 uppercase">{renewal ? "Lease Renewal" : "Lease Agreement"}</h1>
+          <p className="text-gray-500 text-sm">
+            {renewal
+              ? "Please review the lease terms carefully, check your details and correct anything that has changed, and sign below."
+              : "Please review the lease terms carefully, fill in your details, and sign below."}
+          </p>
         </div>
 
         {/* Lease Schedule */}
@@ -298,6 +400,7 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
                         checked={formData.identityType === value}
                         onChange={handleChange}
                         required
+                        disabled={renewal && formData.identityType !== value}
                         className="w-4 h-4 accent-black"
                       />
                       {label}
@@ -318,6 +421,7 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
                     value={formData.idNumber}
                     onChange={handleChange}
                     required
+                    readOnly={renewal}
                     {...(passport ? {} : { pattern: "\\d{13}", title: "ID number must be exactly 13 digits" })}
                     className={INPUT_CLASS}
                   />
@@ -399,6 +503,11 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
               The property has two Parking Bays. Having a car does not by itself give you one; the landlord grants a
               Parking Reservation only when a bay is free.
             </p>
+            {renewalTenant?.parkingReservation && (
+              <p className="text-xs font-medium mt-2">
+                You hold a Parking Reservation. Answering &ldquo;I do not have a car&rdquo; ends it.
+              </p>
+            )}
           </fieldset>
 
           {/* Signature Section */}

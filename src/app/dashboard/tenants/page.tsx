@@ -7,7 +7,8 @@ import type { DashboardRow, SignatureView, TenantView } from '@/lib/lease/views'
 import EditTenantModal, { TenantChanges } from '@/components/EditTenantModal';
 import ConfirmDeleteModal from '@/components/ConfirmDeleteModal';
 import SignatureViewModal from '@/components/SignatureViewModal';
-import { Search, Filter, Edit2, Trash2, ArrowUpDown, PenLine, Copy, Check, RefreshCw } from 'lucide-react';
+import RenewalLinkModal from '@/components/RenewalLinkModal';
+import { Search, Filter, Edit2, Trash2, ArrowUpDown, PenLine, Copy, Check, RefreshCw, CalendarPlus } from 'lucide-react';
 
 type SortField = 'name' | 'createdAt';
 type SortOrder = 'asc' | 'desc';
@@ -44,6 +45,7 @@ export default function TenantsPage() {
   const [deleting, setDeleting] = useState<DashboardRow | null>(null);
   const [signature, setSignature] = useState<{ tenantName: string; view: SignatureView } | null>(null);
   const [copiedLinkId, setCopiedLinkId] = useState('');
+  const [renewing, setRenewing] = useState<DashboardRow | null>(null);
 
   // Bumping this reloads the list.
   const [reloads, setReloads] = useState(0);
@@ -322,6 +324,15 @@ export default function TenantsPage() {
                             <Edit2 size={16} />
                           </button>
                         )}
+                        {tenant?.state === 'current' && hasSignature && (
+                          <button
+                            onClick={() => setRenewing(row)}
+                            className={`p-2 border transition-colors hover:border-black hover:bg-black hover:text-white ${row.renewal ? 'border-black' : 'border-gray-200'}`}
+                            title={row.renewal ? 'Renewal Signing Link (not signed yet)' : 'Create Signing Link for a Renewal'}
+                          >
+                            <CalendarPlus size={16} />
+                          </button>
+                        )}
                         {hasSignature && (
                           <button
                             onClick={() => handleViewSignature(row)}
@@ -363,6 +374,13 @@ export default function TenantsPage() {
         onClose={() => setEditingTenant(null)}
         tenant={editingTenant}
         onSave={handleSaveTenant}
+      />
+
+      <RenewalLinkModal
+        key={renewing ? rowKey(renewing) : undefined}
+        row={renewing}
+        onClose={() => setRenewing(null)}
+        onChanged={reload}
       />
 
       <ConfirmDeleteModal
