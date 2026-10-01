@@ -3,13 +3,16 @@
 
 export type TenantState = "current" | "moved_out";
 export type LeaseState = "awaiting_signature" | "signed" | "ended";
+export type IdentityNumberType = "sa_id" | "passport";
+export type CarDeclaration = "car" | "no_car";
 
 export interface TenantRecord {
   name: string;
   email: string;
   phone: string;
-  identityNumberType: "sa_id";
+  identityNumberType: IdentityNumberType;
   identityNumber: string;
+  passportCountry: string | null; // the issuing country; null for an SA ID
   dateOfBirth: string | null; // YYYY-MM-DD
   depositPaid: number | null; // null until the landlord records it
   parkingReservation: boolean | null; // null until the landlord records it
@@ -36,6 +39,7 @@ export interface LeaseRecord {
   // What the landlord set for whoever signs this first Lease. Copied onto the new Tenant
   // at signing. null on a migrated Lease.
   newTenant: NewTenantTerms | null;
+  carDeclaration: CarDeclaration | null; // null until signed, and on a migrated Lease
   signature: LeaseSignature | null;
   createdAt: Date;
   legacyId?: string;

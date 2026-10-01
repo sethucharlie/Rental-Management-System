@@ -2,6 +2,7 @@ import { Clock, LeaseStore, Mailer, SignResult } from "./ports";
 import { landlordNoticeEmail, signingLinkEmail, tenantConfirmationEmail } from "./emails";
 import { planMigration } from "./legacy";
 import {
+  CarDeclaration,
   currentLease,
   dateInSouthAfrica,
   dateOfBirthFromSAId,
@@ -24,7 +25,15 @@ import {
   SubmissionFields,
   TenantDetailsFields,
 } from "./validation";
-import { DashboardRow, DocumentView, LeaseView, MigrationReport, SignatureView, TenantView } from "./views";
+import {
+  DashboardRow,
+  DocumentView,
+  LeaseScheduleView,
+  LeaseView,
+  MigrationReport,
+  SignatureView,
+  TenantView,
+} from "./views";
 
 export interface LeaseModuleDeps {
   store: LeaseStore;
@@ -52,7 +61,7 @@ export interface TenantChanges extends TenantDetailsFields {
 export class InvalidSigningLinkError extends Error {}
 
 export type OpenResult =
-  | { status: "open"; document: DocumentView }
+  | { status: "open"; document: DocumentView; schedule: LeaseScheduleView }
   | { status: "not_found" }
   | { status: "already_signed" };
 
@@ -101,6 +110,7 @@ export function createLeaseModule({ store, mailer, clock, landlordEmail, appUrl,
         endDate: firstLeaseEndDate(input.startDate),
         documentVersion: document.version,
         newTenant: { depositPaid: Number(input.deposit), parkingReservation: input.parkingReservation === true },
+        carDeclaration: null,
         signature: null,
         createdAt: clock.now(),
       });
@@ -118,39 +128,50 @@ export function createLeaseModule({ store, mailer, clock, landlordEmail, appUrl,
       return { status: "sent" };
     },
 
-    // An open link offers the Lease Document Version that Lease is signed on.
+    // An open link offers the Lease Document Version that Lease is signed on, and
+    // shows the Lease Schedule the landlord set.
     async openSigningLink(id: string): Promise<OpenResult> {
       const lease = await store.getLease(id);
       if (!lease) return { status: "not_found" };
       if (lease.signature) return { status: "already_signed" };
-      return { status: "open", document: documentView(documentVersion(lease.documentVersion)) };
+      return {
+        status: "open",
+        document: documentView(documentVersion(lease.documentVersion)),
+        schedule: scheduleView(lease),
+      };
     },
 
     async signLease(id: string, submission: Submission): Promise<SignOutcome> {
-      const error = findSubmissionError(submission);
+      const signedAt = clock.now();
+      const signedOn = dateInSouthAfrica(signedAt);
+      const error = findSubmissionError(submission, signedOn);
       if (error) return { status: "invalid", error };
 
       const lease = await store.getLease(id);
       if (!lease) return { status: "not_found" };
 
-      const signedAt = clock.now();
+      const passport = submission.identityType === "passport";
       const tenant: TenantRecord = {
         name: submission.fullName.trim(),
         email: submission.email.trim(),
         phone: submission.phone,
-        identityNumberType: "sa_id",
-        identityNumber: submission.idNumber,
-        dateOfBirth: dateOfBirthFromSAId(submission.idNumber, dateInSouthAfrica(signedAt)),
+        identityNumberType: passport ? "passport" : "sa_id",
+        identityNumber: submission.idNumber.trim(),
+        passportCountry: passport ? submission.passportCountry.trim() : null,
+        dateOfBirth: passport ? submission.dateOfBirth : dateOfBirthFromSAId(submission.idNumber, signedOn),
         depositPaid: lease.newTenant?.depositPaid ?? null,
         parkingReservation: lease.newTenant?.parkingReservation ?? null,
         state: "current",
         movedOutOn: null,
       };
       const status = await store.signFirstLease(id, tenant, {
-        image: submission.signatureBase64,
-        printedName: submission.signatureName,
-        dateSigned: submission.signatureDate,
-        signedAt,
+        carDeclaration: submission.carDeclaration as CarDeclaration,
+        signature: {
+          image: submission.signatureBase64,
+          printedName: submission.signatureName,
+          dateSigned: submission.signatureDate,
+          signedAt,
+        },
       });
 
       if (status === "signed") {
@@ -188,12 +209,13 @@ export function createLeaseModule({ store, mailer, clock, landlordEmail, appUrl,
     },
 
     async updateTenant(id: string, changes: TenantChanges): Promise<UpdateOutcome> {
-      const error = findTenantDetailsError(changes);
-      if (error) return { status: "invalid", error };
       if (!["current", "moved_out"].includes(changes.state)) return { status: "invalid", error: "Unknown Tenant state." };
 
       const tenant = await store.getTenant(id);
       if (!tenant) return { status: "not_found" };
+
+      const error = findTenantDetailsError(changes, tenant.identityNumberType);
+      if (error) return { status: "invalid", error };
 
       const identityNumber = changes.identityNumber.trim();
       const movingOut = changes.state === "moved_out";
@@ -202,7 +224,9 @@ export function createLeaseModule({ store, mailer, clock, landlordEmail, appUrl,
         email: changes.email.trim(),
         phone: changes.phone.trim(),
         identityNumber,
-        dateOfBirth: dateOfBirthFromSAId(identityNumber, today()),
+        // A passport Tenant's date of birth came from the form, so it stays.
+        dateOfBirth:
+          tenant.identityNumberType === "sa_id" ? dateOfBirthFromSAId(identityNumber, today()) : tenant.dateOfBirth,
         state: changes.state,
         movedOutOn: movingOut ? (tenant.movedOutOn ?? today()) : null,
       });
@@ -251,7 +275,9 @@ function tenantView(t: Stored<TenantRecord>): TenantView {
     name: t.name,
     email: t.email,
     phone: t.phone,
+    identityNumberType: t.identityNumberType,
     identityNumber: t.identityNumber,
+    passportCountry: t.passportCountry,
     dateOfBirth: t.dateOfBirth,
     depositPaid: t.depositPaid,
     parkingReservation: t.parkingReservation,
@@ -265,6 +291,18 @@ function documentView(v: LeaseDocumentVersion): DocumentView {
   return { version: v.version, url: "/" + v.file.split("/").map(encodeURIComponent).join("/") };
 }
 
+// A migrated link has no dates or Deposit yet; the page shows those as blank.
+function scheduleView(l: LeaseRecord): LeaseScheduleView {
+  return {
+    unitType: l.unitType,
+    unitNumber: l.unitNumber,
+    rent: l.rent,
+    startDate: l.startDate,
+    endDate: l.endDate,
+    deposit: l.newTenant?.depositPaid ?? null,
+  };
+}
+
 function leaseView(l: Stored<LeaseRecord>, today: string): LeaseView {
   return {
     id: l.id,
@@ -273,6 +311,7 @@ function leaseView(l: Stored<LeaseRecord>, today: string): LeaseView {
     rent: l.rent,
     startDate: l.startDate,
     endDate: l.endDate,
+    carDeclaration: l.carDeclaration,
     state: leaseState(l, today),
     createdAt: l.createdAt.toISOString(),
   };

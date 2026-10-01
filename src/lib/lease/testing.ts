@@ -37,13 +37,13 @@ export function createMemoryStore(): MemoryStore {
     async deleteLease(id) {
       leases.delete(id);
     },
-    async signFirstLease(leaseId, tenant, signature) {
+    async signFirstLease(leaseId, tenant, { carDeclaration, signature }) {
       const lease = leases.get(leaseId);
       if (!lease) return "not_found";
       if (lease.signature) return "already_signed";
       const tenantId = `tenant-${nextId++}`;
       tenants.set(tenantId, structuredClone(tenant));
-      leases.set(leaseId, { ...lease, tenantId, signature: structuredClone(signature) });
+      leases.set(leaseId, { ...lease, tenantId, carDeclaration, signature: structuredClone(signature) });
       return "signed";
     },
 

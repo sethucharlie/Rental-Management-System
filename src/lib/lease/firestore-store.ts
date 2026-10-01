@@ -30,7 +30,7 @@ export function createFirestoreStore(db: Firestore): LeaseStore {
       await leases.doc(id).delete();
     },
 
-    async signFirstLease(leaseId, tenant, signature) {
+    async signFirstLease(leaseId, tenant, { carDeclaration, signature }) {
       const leaseRef = leases.doc(leaseId);
       const tenantRef = tenants.doc();
       return db.runTransaction(async (tx) => {
@@ -40,6 +40,7 @@ export function createFirestoreStore(db: Firestore): LeaseStore {
         tx.create(tenantRef, tenantToDoc(tenant));
         tx.update(leaseRef, {
           tenantId: tenantRef.id,
+          carDeclaration,
           signature: { ...signature, signedAt: Timestamp.fromDate(signature.signedAt) },
           updatedAt: FieldValue.serverTimestamp(),
         });
@@ -122,6 +123,7 @@ function leaseFromDoc(id: string, d: DocumentData): Stored<LeaseRecord> {
     newTenant: d.newTenant
       ? { depositPaid: Number(d.newTenant.depositPaid) || 0, parkingReservation: d.newTenant.parkingReservation === true }
       : null,
+    carDeclaration: d.carDeclaration === "car" || d.carDeclaration === "no_car" ? d.carDeclaration : null,
     signature: d.signature
       ? {
           image: d.signature.image ?? "",
@@ -149,8 +151,10 @@ function tenantFromDoc(id: string, d: DocumentData): Stored<TenantRecord> {
     name: d.name ?? "",
     email: d.email ?? "",
     phone: d.phone ?? "",
-    identityNumberType: "sa_id",
+    // Tenants saved before passports existed all gave an SA ID.
+    identityNumberType: d.identityNumberType === "passport" ? "passport" : "sa_id",
     identityNumber: d.identityNumber ?? "",
+    passportCountry: d.passportCountry ?? null,
     dateOfBirth: d.dateOfBirth ?? null,
     depositPaid: typeof d.depositPaid === "number" ? d.depositPaid : null,
     parkingReservation: typeof d.parkingReservation === "boolean" ? d.parkingReservation : null,

@@ -1,12 +1,14 @@
 // What the dashboard receives. Plain JSON, safe to import as types from the browser.
-import { LeaseState, TenantState } from "./model";
+import { CarDeclaration, IdentityNumberType, LeaseState, TenantState } from "./model";
 
 export interface TenantView {
   id: string;
   name: string;
   email: string;
   phone: string;
+  identityNumberType: IdentityNumberType;
   identityNumber: string;
+  passportCountry: string | null;
   dateOfBirth: string | null;
   depositPaid: number | null;
   parkingReservation: boolean | null;
@@ -23,6 +25,7 @@ export interface LeaseView {
   rent: number;
   startDate: string | null;
   endDate: string | null;
+  carDeclaration: CarDeclaration | null;
   state: LeaseState;
   createdAt: string;
 }
@@ -43,6 +46,16 @@ export interface SignatureView {
 export interface DocumentView {
   version: number;
   url: string;
+}
+
+// The Lease Schedule a Tenant sees before signing a first Lease.
+export interface LeaseScheduleView {
+  unitType: string;
+  unitNumber: string;
+  rent: number;
+  startDate: string | null;
+  endDate: string | null;
+  deposit: number | null;
 }
 
 export interface MigrationReport {

@@ -351,7 +351,7 @@ describe("Lease Document Versions", () => {
   it("offers the signer the version their Signing Link was created on", async () => {
     const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500", ...firstLeaseTerms });
 
-    expect(await lease.openSigningLink(id)).toEqual({
+    expect(await lease.openSigningLink(id)).toMatchObject({
       status: "open",
       document: { version: 1, url: "/lease-documents/version-1.pdf" },
     });
@@ -495,6 +495,168 @@ describe("Signing Link for a first Lease", () => {
   });
 });
 
+describe("First-Lease form", () => {
+  let store: MemoryStore;
+  let lease: LeaseModule;
+
+  beforeEach(() => {
+    store = createMemoryStore();
+    lease = createLeaseModule({
+      store,
+      mailer: createFakeMailer(),
+      clock: fixedClock(new Date("2026-10-05T09:00:00Z")),
+      landlordEmail: "landlord@example.com",
+      appUrl: "https://lease.example.com",
+      documentVersions: [versionOne],
+    });
+  });
+
+  const link = () => lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500", ...firstLeaseTerms });
+  const signedTenant = async () => (await lease.listDashboard())[0].tenant;
+
+  const passport = {
+    identityType: "passport",
+    idNumber: " A1234567 ",
+    passportCountry: " Zimbabwe ",
+    dateOfBirth: "1992-07-14",
+  };
+
+  describe("SA ID", () => {
+    it.each([
+      ["9001015009086", "1990-01-01"],
+      ["0503125009087", "2005-03-12"],
+      ["3006155009081", "1930-06-15"], // 2030 lies in the future, so 1930
+    ])("works out the date of birth of %s as %s", async (idNumber, dateOfBirth) => {
+      const { id } = await link();
+      await lease.signLease(id, { ...validSubmission, idNumber });
+
+      expect(await signedTenant()).toMatchObject({ identityNumberType: "sa_id", identityNumber: idNumber, dateOfBirth });
+    });
+
+    it.each([
+      ["a wrong check digit", "9001015009087"],
+      ["12 digits", "900101500908"],
+      ["a letter", "90010150090A6"],
+      ["a month that does not exist", "9013015009081"],
+      ["29 February in a year that has none", "0102295009082"],
+    ])("refuses an ID with %s", async (_, idNumber) => {
+      const { id } = await link();
+
+      expect(await lease.signLease(id, { ...validSubmission, idNumber })).toEqual({
+        status: "invalid",
+        error: "Please enter a valid South African ID number.",
+      });
+    });
+
+    it("takes the date of birth from the ID, not from the form, and stores no passport country", async () => {
+      const { id } = await link();
+      await lease.signLease(id, { ...validSubmission, dateOfBirth: "1999-09-09", passportCountry: "Zimbabwe" });
+
+      expect(await signedTenant()).toMatchObject({ dateOfBirth: "1990-01-01", passportCountry: null });
+    });
+  });
+
+  describe("passport", () => {
+    it("saves the passport number, issuing country and date of birth", async () => {
+      const { id } = await link();
+
+      expect(await lease.signLease(id, { ...validSubmission, ...passport })).toEqual({ status: "signed" });
+      expect(await signedTenant()).toMatchObject({
+        identityNumberType: "passport",
+        identityNumber: "A1234567",
+        passportCountry: "Zimbabwe",
+        dateOfBirth: "1992-07-14",
+      });
+    });
+
+    it.each([
+      ["no number", { idNumber: "  " }, "Please enter your passport number."],
+      ["no issuing country", { passportCountry: "" }, "Please enter the country that issued your passport."],
+      ["no date of birth", { dateOfBirth: "" }, "Please enter your date of birth."],
+      ["a date of birth that does not exist", { dateOfBirth: "1992-02-30" }, "Please enter your date of birth."],
+      ["a date of birth in the future", { dateOfBirth: "2026-10-06" }, "Please enter your date of birth."],
+    ])("refuses a passport with %s and leaves the link open", async (_, change, error) => {
+      const { id } = await link();
+
+      expect(await lease.signLease(id, { ...validSubmission, ...passport, ...change })).toEqual({ status: "invalid", error });
+      expect(await lease.openSigningLink(id)).toMatchObject({ status: "open" });
+    });
+  });
+
+  it("refuses a submission that names neither SA ID nor passport", async () => {
+    const { id } = await link();
+
+    expect(await lease.signLease(id, { ...validSubmission, identityType: "drivers_licence" })).toEqual({
+      status: "invalid",
+      error: "Please choose South African ID or passport.",
+    });
+  });
+
+  it.each([
+    ["car", "car"],
+    ["no_car", "no_car"],
+  ] as const)("saves a Car Declaration of %s on the Lease", async (_, carDeclaration) => {
+    const { id } = await link();
+    await lease.signLease(id, { ...validSubmission, carDeclaration });
+
+    expect((await store.getLease(id))?.carDeclaration).toBe(carDeclaration);
+    expect((await lease.listDashboard())[0].lease).toMatchObject({ carDeclaration });
+  });
+
+  it.each(["", "maybe"])("refuses a Car Declaration of %j", async (carDeclaration) => {
+    const { id } = await link();
+
+    expect(await lease.signLease(id, { ...validSubmission, carDeclaration })).toEqual({
+      status: "invalid",
+      error: "Please say whether you have a car.",
+    });
+  });
+
+  it("shows the Lease Schedule the landlord set on an open link", async () => {
+    const { id } = await link();
+
+    expect(await lease.openSigningLink(id)).toMatchObject({
+      status: "open",
+      schedule: {
+        unitType: "Flat",
+        unitNumber: "5",
+        rent: 1500,
+        startDate: "2026-10-15",
+        endDate: "2026-12-31",
+        deposit: 1500,
+      },
+    });
+  });
+
+  it("shows a migrated link's Lease Schedule with the dates and Deposit left blank", async () => {
+    store.addLegacyRecord(unsignedLegacy);
+    await lease.migrate({ dryRun: false });
+
+    expect(await lease.openSigningLink("old-2")).toMatchObject({
+      schedule: { unitType: "House", unitNumber: "1", rent: 3000, startDate: null, endDate: null, deposit: null },
+    });
+  });
+
+  it("lets the landlord edit a passport Tenant without losing their country or date of birth", async () => {
+    const { id } = await link();
+    await lease.signLease(id, { ...validSubmission, ...passport });
+    const tenant = await signedTenant();
+    const edit = { ...tenantDetails, identityNumber: "B7654321", state: "current" as const };
+
+    expect(await lease.updateTenant(tenant!.id, edit)).toEqual({ status: "saved" });
+    expect(await signedTenant()).toMatchObject({
+      identityNumberType: "passport",
+      identityNumber: "B7654321",
+      passportCountry: "Zimbabwe",
+      dateOfBirth: "1992-07-14",
+    });
+    expect(await lease.updateTenant(tenant!.id, { ...edit, identityNumber: " " })).toEqual({
+      status: "invalid",
+      error: "Please fill in every field.",
+    });
+  });
+});
+
 const firstLeaseTerms = { startDate: "2026-10-15", deposit: "1500", parkingReservation: false };
 
 const versionOne: LeaseDocumentVersion = {
@@ -542,8 +704,12 @@ const tenantDetails = {
 const validSubmission = {
   fullName: "Thandi Mokoena",
   email: "thandi@example.com",
+  identityType: "sa_id",
   idNumber: "9001015009086",
+  passportCountry: "",
+  dateOfBirth: "",
   phone: "0821234567",
+  carDeclaration: "no_car",
   signatureName: "Thandi Mokoena",
   signatureDate: "2026-10-05",
   signatureBase64: "data:image/png;base64,AAAA",

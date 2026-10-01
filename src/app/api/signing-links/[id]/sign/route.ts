@@ -12,8 +12,12 @@ export async function POST(request: NextRequest, ctx: RouteContext<"/api/signing
     const outcome = await getLeaseModule().signLease(id, {
       fullName: text("fullName"),
       email: text("email"),
+      identityType: text("identityType"),
       idNumber: text("idNumber"),
+      passportCountry: text("passportCountry"),
+      dateOfBirth: text("dateOfBirth"),
       phone: text("phone"),
+      carDeclaration: text("carDeclaration"),
       signatureName: text("signatureName"),
       signatureDate: text("signatureDate"),
       signatureBase64: text("signatureBase64"),

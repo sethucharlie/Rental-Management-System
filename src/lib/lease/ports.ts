@@ -1,7 +1,7 @@
 // The Lease module talks to the outside world only through these ports.
 // Production wires Firestore, Gmail and the system clock; tests wire fakes.
 import { LegacyRecord, MigrationStep } from "./legacy";
-import { LeaseRecord, LeaseSignature, Stored, TenantRecord } from "./model";
+import { CarDeclaration, LeaseRecord, LeaseSignature, Stored, TenantRecord } from "./model";
 
 export type SignResult = "signed" | "already_signed" | "not_found";
 
@@ -11,8 +11,12 @@ export interface LeaseStore {
   listLeases(): Promise<Stored<LeaseRecord>[]>;
   deleteLease(id: string): Promise<void>;
   // In one atomic step, and only if the Lease is not signed yet: create the Tenant,
-  // link the Lease to them and save the signature.
-  signFirstLease(leaseId: string, tenant: TenantRecord, signature: LeaseSignature): Promise<SignResult>;
+  // link the Lease to them and save the Car Declaration and signature.
+  signFirstLease(
+    leaseId: string,
+    tenant: TenantRecord,
+    signing: { carDeclaration: CarDeclaration; signature: LeaseSignature },
+  ): Promise<SignResult>;
 
   getTenant(id: string): Promise<Stored<TenantRecord> | null>;
   listTenants(): Promise<Stored<TenantRecord>[]>;
