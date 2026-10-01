@@ -31,9 +31,11 @@ export interface LeaseView {
 }
 
 // One row per Tenant with their current Lease, plus one per first Lease nobody has signed yet.
+// `renewal` is the Tenant's Renewal Signing Link while it waits for their signature.
 export interface DashboardRow {
   tenant: TenantView | null;
   lease: LeaseView | null;
+  renewal: LeaseView | null;
 }
 
 export interface SignatureView {
@@ -56,6 +58,18 @@ export interface LeaseScheduleView {
   startDate: string | null;
   endDate: string | null;
   deposit: number | null;
+}
+
+// What a Renewal page pre-fills for the Tenant to check, once they give their Identity Number.
+export interface RenewalTenantView {
+  name: string;
+  email: string;
+  phone: string;
+  identityNumberType: IdentityNumberType;
+  identityNumber: string;
+  passportCountry: string | null;
+  dateOfBirth: string | null;
+  parkingReservation: boolean; // a "no car" Car Declaration ends it
 }
 
 export interface MigrationReport {

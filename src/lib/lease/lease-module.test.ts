@@ -138,7 +138,7 @@ describe("Tenants and Leases", () => {
     const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500", ...firstLeaseTerms });
 
     expect(await lease.listDashboard()).toEqual([
-      { tenant: null, lease: expect.objectContaining({ id, unitNumber: "5", rent: 1500, state: "awaiting_signature" }) },
+      { tenant: null, lease: expect.objectContaining({ id, unitNumber: "5", rent: 1500, state: "awaiting_signature" }), renewal: null },
     ]);
   });
 
@@ -235,6 +235,7 @@ describe("Tenants and Leases", () => {
             needsDepositAndParking: true,
           }),
           lease: expect.objectContaining({ id: "old-1", unitType: "Flat", unitNumber: "3", rent: 1500, endDate: "2026-12-31", state: "signed" }),
+          renewal: null,
         },
       ]);
       expect(await lease.getSignature("old-1")).toEqual({
@@ -277,7 +278,7 @@ describe("Tenants and Leases", () => {
       await lease.migrate({ dryRun: false });
 
       expect(await lease.listDashboard()).toEqual([
-        { tenant: null, lease: expect.objectContaining({ id: "old-2", unitType: "House", rent: 3000, state: "awaiting_signature" }) },
+        { tenant: null, lease: expect.objectContaining({ id: "old-2", unitType: "House", rent: 3000, state: "awaiting_signature" }), renewal: null },
       ]);
       expect(await lease.openSigningLink("old-2")).toMatchObject({ status: "open" });
       expect(await lease.signLease("old-2", validSubmission)).toEqual({ status: "signed" });
@@ -657,7 +658,239 @@ describe("First-Lease form", () => {
   });
 });
 
-const firstLeaseTerms = { startDate: "2026-10-15", deposit: "1500", parkingReservation: false };
+describe("Renewal", () => {
+  let lease: LeaseModule;
+  let store: MemoryStore;
+  let mailer: FakeMailer;
+  let clock: ReturnType<typeof settableClock>;
+  let tenantId: string;
+  let firstLeaseId: string;
+
+  const renewalTerms = { unitType: "Flat", unitNumber: "5", rent: "1650" };
+  const renewalSubmission = { ...validSubmission, carDeclaration: "car" };
+  const renewal = () => lease.createRenewalLink(tenantId, renewalTerms);
+  const tenantNow = async () => (await store.getTenant(tenantId))!;
+
+  // A Current Tenant who signed a first Lease ending 31 December 2026, with a Deposit
+  // and a Parking Reservation on record.
+  const signTenant = async (submission: typeof validSubmission) => {
+    ({ id: firstLeaseId } = await lease.createSigningLink({
+      unitType: "Flat",
+      unitNumber: "5",
+      rent: "1500",
+      startDate: "2026-10-15",
+      deposit: "1500",
+      parkingReservation: true,
+    }));
+    await lease.signLease(firstLeaseId, submission);
+    tenantId = (await store.listTenants())[0].id;
+  };
+
+  beforeEach(async () => {
+    store = createMemoryStore();
+    mailer = createFakeMailer();
+    clock = settableClock(new Date("2026-10-05T09:00:00Z"));
+    lease = createLeaseModule({
+      store,
+      mailer,
+      clock,
+      landlordEmail: "landlord@example.com",
+      appUrl: "https://lease.example.com",
+      documentVersions: [versionOne],
+    });
+    await signTenant({ ...validSubmission, carDeclaration: "car" });
+  });
+
+  it("asks for the Identity Number before showing anything", async () => {
+    const { id } = await renewal();
+
+    expect(await lease.openSigningLink(id)).toEqual({ status: "identity_required" });
+  });
+
+  it("returns no details for a wrong Identity Number", async () => {
+    const { id } = await renewal();
+
+    expect(await lease.checkRenewalIdentity(id, "8001015009087")).toEqual({ status: "wrong_identity" });
+    expect(await lease.checkRenewalIdentity(id, "")).toEqual({ status: "wrong_identity" });
+  });
+
+  it("opens for the right SA ID written with spaces", async () => {
+    const { id } = await renewal();
+
+    expect(await lease.checkRenewalIdentity(id, " 900101 5009 086 ")).toMatchObject({
+      status: "open",
+      document: { version: 1 },
+      schedule: { unitNumber: "5", rent: 1650, startDate: "2027-01-01", endDate: "2027-12-31", deposit: 1500 },
+      tenant: { name: "Thandi Mokoena", email: "thandi@example.com", identityNumberType: "sa_id", parkingReservation: true },
+    });
+  });
+
+  it("opens for the right passport number in a different letter case", async () => {
+    store = createMemoryStore();
+    lease = createLeaseModule({
+      store,
+      mailer,
+      clock,
+      landlordEmail: "landlord@example.com",
+      appUrl: "https://lease.example.com",
+      documentVersions: [versionOne],
+    });
+    await signTenant({
+      ...validSubmission,
+      identityType: "passport",
+      idNumber: "AB123456",
+      passportCountry: "Zimbabwe",
+      dateOfBirth: "1992-07-14",
+    });
+    const { id } = await renewal();
+
+    expect(await lease.checkRenewalIdentity(id, "ab 123456")).toMatchObject({
+      status: "open",
+      tenant: { identityNumberType: "passport", passportCountry: "Zimbabwe", dateOfBirth: "1992-07-14" },
+    });
+  });
+
+  it("refuses the sixth try within the block period, even with the right number, then opens again", async () => {
+    const { id } = await renewal();
+    for (let i = 0; i < 5; i++) {
+      expect(await lease.checkRenewalIdentity(id, "0000000000000")).toEqual({ status: "wrong_identity" });
+    }
+
+    expect(await lease.checkRenewalIdentity(id, "9001015009086")).toEqual({ status: "blocked" });
+    expect(await lease.signLease(id, renewalSubmission)).toEqual({ status: "blocked" });
+
+    clock.set(new Date("2026-10-05T09:16:00Z"));
+    expect(await lease.checkRenewalIdentity(id, "9001015009086")).toMatchObject({ status: "open" });
+  });
+
+  it("forgets wrong tries once the right number is given", async () => {
+    const { id } = await renewal();
+    for (let i = 0; i < 4; i++) await lease.checkRenewalIdentity(id, "0000000000000");
+    await lease.checkRenewalIdentity(id, "9001015009086");
+
+    for (let i = 0; i < 4; i++) await lease.checkRenewalIdentity(id, "0000000000000");
+    expect(await lease.checkRenewalIdentity(id, "9001015009086")).toMatchObject({ status: "open" });
+  });
+
+  it.each([
+    ["2026-09-06T10:00:00Z", true],
+    ["2026-09-07T10:00:00Z", false],
+    ["2026-11-03T10:00:00Z", false],
+    ["2026-11-04T10:00:00Z", true],
+  ])("on %s, warns the landlord that the link is outside the Renewal window: %s", async (at, warned) => {
+    clock.set(new Date(at));
+
+    expect(await renewal()).toMatchObject({ outsideRenewalWindow: warned });
+  });
+
+  it("refuses to sign with a wrong Identity Number, and counts the try", async () => {
+    const { id } = await renewal();
+
+    expect(await lease.signLease(id, { ...renewalSubmission, idNumber: "0000000000000" })).toEqual({
+      status: "wrong_identity",
+    });
+    expect(await lease.checkRenewalIdentity(id, "9001015009086")).toMatchObject({ status: "open" });
+    expect((await store.getLease(id))!.signature).toBeNull();
+  });
+
+  it("makes the signed Renewal a new Lease for the next Lease Year and keeps the old one", async () => {
+    const { id } = await renewal();
+
+    expect(await lease.signLease(id, renewalSubmission)).toEqual({ status: "signed" });
+    const leases = (await store.listLeases()).filter((l) => l.tenantId === tenantId);
+    expect(leases).toHaveLength(2);
+    expect(await store.getLease(firstLeaseId)).toMatchObject({ endDate: "2026-12-31", rent: 1500 });
+    expect(await store.getLease(id)).toMatchObject({
+      renews: firstLeaseId,
+      startDate: "2027-01-01",
+      endDate: "2027-12-31",
+      rent: 1650,
+      carDeclaration: "car",
+      signature: expect.objectContaining({ printedName: "Thandi Mokoena" }),
+    });
+    expect(await lease.openSigningLink(id)).toEqual({ status: "already_signed" });
+    expect(await store.listTenants()).toHaveLength(1);
+  });
+
+  it("ends the Parking Reservation on a \"no car\" Renewal and leaves the Deposit as it was after a rent increase", async () => {
+    const { id } = await renewal();
+
+    await lease.signLease(id, { ...renewalSubmission, carDeclaration: "no_car" });
+    expect(await tenantNow()).toMatchObject({ parkingReservation: false, depositPaid: 1500 });
+  });
+
+  it("keeps the Parking Reservation on a \"car\" Renewal", async () => {
+    const { id } = await renewal();
+
+    await lease.signLease(id, renewalSubmission);
+    expect(await tenantNow()).toMatchObject({ parkingReservation: true });
+  });
+
+  it("saves the details the Tenant corrected, but not a changed Identity Number", async () => {
+    const { id } = await renewal();
+
+    await lease.signLease(id, { ...renewalSubmission, fullName: " Thandi Dube ", phone: "0839876543" });
+    expect(await tenantNow()).toMatchObject({ name: "Thandi Dube", phone: "0839876543", identityNumber: "9001015009086" });
+  });
+
+  it("refuses a Renewal submission with a bad phone number", async () => {
+    const { id } = await renewal();
+
+    expect(await lease.signLease(id, { ...renewalSubmission, phone: "123" })).toEqual({
+      status: "invalid",
+      error: "Please enter a valid South African phone number.",
+    });
+  });
+
+  it("still opens and signs on 15 January", async () => {
+    const { id } = await renewal();
+    clock.set(new Date("2027-01-15T09:00:00Z"));
+
+    expect(await lease.checkRenewalIdentity(id, "9001015009086")).toMatchObject({ status: "open" });
+    expect(await lease.signLease(id, renewalSubmission)).toEqual({ status: "signed" });
+    expect(await store.getLease(id)).toMatchObject({ startDate: "2027-01-01", endDate: "2027-12-31" });
+  });
+
+  it("shows the old Lease on the dashboard until the Renewal is signed", async () => {
+    const { id } = await renewal();
+    const [row] = await lease.listDashboard();
+    expect(row).toMatchObject({ lease: { id: firstLeaseId }, renewal: { id, state: "awaiting_signature" } });
+
+    await lease.signLease(id, renewalSubmission);
+    expect(await lease.listDashboard()).toEqual([
+      expect.objectContaining({ lease: expect.objectContaining({ id, state: "signed" }), renewal: null }),
+    ]);
+  });
+
+  it("refuses a second open Renewal, a Moved Out Tenant, and bad terms", async () => {
+    await renewal();
+    await expect(renewal()).rejects.toThrow("already has a Renewal Signing Link");
+    await expect(lease.createRenewalLink(tenantId, { ...renewalTerms, rent: "0" })).rejects.toThrow(InvalidSigningLinkError);
+
+    await store.updateTenant(tenantId, { state: "moved_out" });
+    await expect(lease.createRenewalLink(tenantId, renewalTerms)).rejects.toThrow("Only a Current Tenant");
+  });
+
+  it("lets the landlord delete an unsigned Renewal link, but not a signed one", async () => {
+    const first = await renewal();
+    expect(await lease.deleteSigningLink(first.id)).toEqual({ status: "deleted" });
+
+    const second = await renewal();
+    await lease.signLease(second.id, renewalSubmission);
+    expect(await lease.deleteSigningLink(second.id)).toEqual({ status: "signed" });
+  });
+
+  it("emails the Renewal link and tells the Tenant they need their Identity Number", async () => {
+    const { id } = await renewal();
+    mailer.sent.length = 0;
+
+    expect(await lease.emailSigningLink(id, "thandi@example.com")).toEqual({ status: "sent" });
+    expect(mailer.sent[0].subject).toBe("Your lease renewal is ready to sign");
+    expect(mailer.sent[0].html).toContain("ID or passport number");
+  });
+});
+
+const firstLeaseTerms ={ startDate: "2026-10-15", deposit: "1500", parkingReservation: false };
 
 const versionOne: LeaseDocumentVersion = {
   version: 1,

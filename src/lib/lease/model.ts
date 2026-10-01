@@ -39,11 +39,22 @@ export interface LeaseRecord {
   // What the landlord set for whoever signs this first Lease. Copied onto the new Tenant
   // at signing. null on a migrated Lease.
   newTenant: NewTenantTerms | null;
+  renews: string | null; // on a Renewal, the Lease it renews; null on a first Lease
   carDeclaration: CarDeclaration | null; // null until signed, and on a migrated Lease
   signature: LeaseSignature | null;
   createdAt: Date;
   legacyId?: string;
+  identityGuard?: IdentityGuard; // Renewals only; missing means no wrong tries yet
 }
+
+// Counts wrong Identity Numbers entered on a Renewal Signing Link.
+export interface IdentityGuard {
+  failures: number; // since the last block or right answer
+  blockedUntil: Date | null;
+}
+
+export const MAX_IDENTITY_TRIES = 5;
+export const IDENTITY_BLOCK_MINUTES = 15;
 
 export interface NewTenantTerms {
   depositPaid: number;
@@ -109,7 +120,38 @@ export function dateOfBirthFromSAId(idNumber: string, today: string): string | n
   return isRealDate(date) ? date : null;
 }
 
-// The newest Lease is the current one.
+// The signed Lease that ends last is the current one; an open Renewal does not replace it
+// until signed. With nothing signed, the newest Lease.
 export function currentLease<T extends LeaseRecord>(leases: T[]): T | null {
+  const signed = leases.filter((l) => l.signature);
+  if (!signed.length) return newest(leases);
+  return signed.reduce((last, l) => ((l.endDate ?? "") > (last.endDate ?? "") ? l : last));
+}
+
+// The Renewal waiting for this Tenant's signature, if any.
+export function openRenewal<T extends LeaseRecord>(leases: T[]): T | null {
+  return newest(leases.filter((l) => l.renews && !l.signature));
+}
+
+function newest<T extends LeaseRecord>(leases: T[]): T | null {
   return leases.reduce<T | null>((latest, l) => (!latest || l.createdAt > latest.createdAt ? l : latest), null);
 }
+
+// A Renewal covers the whole Lease Year after the one its current Lease ends in.
+export function renewalPeriod(currentEndDate: string): { startDate: string; endDate: string } {
+  const year = Number(currentEndDate.slice(0, 4)) + 1;
+  return { startDate: `${year}-01-01`, endDate: `${year}-12-31` };
+}
+
+// Renewal Signing Links should go out from 7 September to 3 November, the Consumer
+// Protection Act notice window for a Lease ending 31 December. Takes YYYY-MM-DD.
+export function isInRenewalWindow(today: string): boolean {
+  const monthDay = today.slice(5);
+  return monthDay >= "09-07" && monthDay <= "11-03";
+}
+
+// Identity Numbers match whatever the spaces or letter case.
+export const sameIdentityNumber = (a: string, b: string) => {
+  const normal = (n: string) => n.replace(/\s+/g, "").toUpperCase();
+  return normal(a) !== "" && normal(a) === normal(b);
+};

@@ -1,6 +1,6 @@
 import { DocumentData, FieldValue, Firestore, Timestamp } from "firebase-admin/firestore";
 import { LegacyRecord } from "./legacy";
-import { LeaseRecord, Stored, TenantRecord } from "./model";
+import { IdentityGuard, LeaseRecord, Stored, TenantRecord } from "./model";
 import { LeaseStore } from "./ports";
 
 // `tenants` holds Tenants and `leases` holds Leases. A migrated Tenant and Lease keep the
@@ -45,6 +45,36 @@ export function createFirestoreStore(db: Firestore): LeaseStore {
           updatedAt: FieldValue.serverTimestamp(),
         });
         return "signed";
+      });
+    },
+
+    async signRenewal(leaseId, tenantChanges, { carDeclaration, signature }) {
+      const leaseRef = leases.doc(leaseId);
+      return db.runTransaction(async (tx) => {
+        const snap = await tx.get(leaseRef);
+        if (!snap.exists || !snap.data()!.tenantId) return "not_found";
+        if (snap.data()!.signature) return "already_signed";
+        const tenantRef = tenants.doc(snap.data()!.tenantId);
+        if (!(await tx.get(tenantRef)).exists) return "not_found";
+        tx.update(tenantRef, { ...withoutUndefined(tenantChanges), updatedAt: FieldValue.serverTimestamp() });
+        tx.update(leaseRef, {
+          carDeclaration,
+          signature: { ...signature, signedAt: Timestamp.fromDate(signature.signedAt) },
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        return "signed";
+      });
+    },
+
+    async updateIdentityGuard(leaseId, next) {
+      const leaseRef = leases.doc(leaseId);
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(leaseRef);
+        if (!snap.exists) return;
+        const guard = next(identityGuardFromDoc(snap.data()!.identityGuard));
+        tx.update(leaseRef, {
+          identityGuard: { failures: guard.failures, blockedUntil: guard.blockedUntil && Timestamp.fromDate(guard.blockedUntil) },
+        });
       });
     },
 
@@ -100,9 +130,18 @@ const toDate = (value: unknown): Date | null => (value instanceof Timestamp ? va
 const withoutUndefined = <T extends object>(obj: T) =>
   Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined));
 
-function leaseToDoc(lease: LeaseRecord) {
+const identityGuardFromDoc = (d: DocumentData | undefined): IdentityGuard => ({
+  failures: Number(d?.failures) || 0,
+  blockedUntil: toDate(d?.blockedUntil),
+});
+
+function leaseToDoc({ identityGuard, ...lease }: LeaseRecord) {
   return withoutUndefined({
     ...lease,
+    identityGuard: identityGuard && {
+      failures: identityGuard.failures,
+      blockedUntil: identityGuard.blockedUntil && Timestamp.fromDate(identityGuard.blockedUntil),
+    },
     signature: lease.signature && { ...lease.signature, signedAt: Timestamp.fromDate(lease.signature.signedAt) },
     createdAt: Timestamp.fromDate(lease.createdAt),
     updatedAt: FieldValue.serverTimestamp(),
@@ -123,6 +162,7 @@ function leaseFromDoc(id: string, d: DocumentData): Stored<LeaseRecord> {
     newTenant: d.newTenant
       ? { depositPaid: Number(d.newTenant.depositPaid) || 0, parkingReservation: d.newTenant.parkingReservation === true }
       : null,
+    renews: d.renews ?? null,
     carDeclaration: d.carDeclaration === "car" || d.carDeclaration === "no_car" ? d.carDeclaration : null,
     signature: d.signature
       ? {
@@ -134,6 +174,7 @@ function leaseFromDoc(id: string, d: DocumentData): Stored<LeaseRecord> {
       : null,
     createdAt: toDate(d.createdAt) ?? new Date(0),
     ...(d.legacyId ? { legacyId: d.legacyId } : {}),
+    ...(d.identityGuard ? { identityGuard: identityGuardFromDoc(d.identityGuard) } : {}),
   };
 }
 
