@@ -281,7 +281,18 @@ export default function TenantsPage() {
                       {tenant ? (
                         <>
                           <div className="font-medium">{tenant.name}</div>
-                          {tenant.identityNumber && <div className="text-xs text-gray-500 mt-1">ID: {tenant.identityNumber}</div>}
+                          {tenant.identityNumber && (
+                            <div className="text-xs text-gray-500 mt-1">
+                              {tenant.identityNumberType === 'passport'
+                                ? `Passport: ${tenant.identityNumber} (${tenant.passportCountry})`
+                                : `ID: ${tenant.identityNumber}`}
+                            </div>
+                          )}
+                          {lease?.carDeclaration && (
+                            <div className="text-xs text-gray-500 mt-1">
+                              {lease.carDeclaration === 'car' ? 'Has a car' : 'No car'}
+                            </div>
+                          )}
                           {tenant.needsDepositAndParking && (
                             <div className="text-xs text-amber-700 mt-1">Deposit and parking not recorded</div>
                           )}

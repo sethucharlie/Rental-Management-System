@@ -73,7 +73,9 @@ export default function EditTenantModal({ tenant, isOpen, onClose, onSave }: Edi
             </div>
 
             <div className="flex items-end gap-4">
-              <label className="text-sm font-medium whitespace-nowrap pb-1">ID Number</label>
+              <label className="text-sm font-medium whitespace-nowrap pb-1">
+                {tenant.identityNumberType === 'passport' ? 'Passport No.' : 'ID Number'}
+              </label>
               <input type="text" name="identityNumber" value={formData.identityNumber} onChange={handleChange} required className="flex-1 min-w-0 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none" />
             </div>
 

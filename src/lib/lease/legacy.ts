@@ -43,6 +43,7 @@ export function planMigration(old: LegacyRecord, now: Date, today: string): Migr
     endDate: signed ? MIGRATED_LEASE_END : null,
     documentVersion: 1, // the only version before Renewals
     newTenant: null,
+    carDeclaration: null, // nobody was asked before Renewals
     signature: signed
       ? {
           image: old.signatureBase64 ?? "",
@@ -65,6 +66,7 @@ export function planMigration(old: LegacyRecord, now: Date, today: string): Migr
     phone: old.phone?.trim() ?? "",
     identityNumberType: "sa_id",
     identityNumber,
+    passportCountry: null,
     dateOfBirth: dateOfBirthFromSAId(identityNumber, today),
     depositPaid: null,
     parkingReservation: null,

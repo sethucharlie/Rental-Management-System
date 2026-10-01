@@ -4,8 +4,17 @@ import { useState, useRef, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
 import { Download } from "lucide-react";
 import SignaturePad, { SignaturePadRef } from "@/components/SignaturePad";
-import { isValidPhone, isValidSAId } from "@/lib/lease/validation";
-import type { DocumentView } from "@/lib/lease/views";
+import { dateInSouthAfrica } from "@/lib/lease/model";
+import { findSubmissionError } from "@/lib/lease/validation";
+import type { DocumentView, LeaseScheduleView } from "@/lib/lease/views";
+
+const INPUT_CLASS = "flex-1 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none w-full min-w-0";
+
+// YYYY-MM-DD to "15 October 2026"; a migrated link may have no dates yet.
+const formatDate = (date: string | null) =>
+  date
+    ? new Date(`${date}T00:00:00Z`).toLocaleDateString("en-ZA", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" })
+    : "To be confirmed";
 
 export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: string }> }) {
   const { tenantId } = use(params);
@@ -18,13 +27,18 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
   const [alreadySigned, setAlreadySigned] = useState(false);
   const [docExists, setDocExists] = useState(true);
   const [leaseDocument, setLeaseDocument] = useState<DocumentView | null>(null);
+  const [schedule, setSchedule] = useState<LeaseScheduleView | null>(null);
   const [showPopia, setShowPopia] = useState(true);
 
   const [formData, setFormData] = useState({
     fullName: "",
     email: "",
+    identityType: "",
     idNumber: "",
+    passportCountry: "",
+    dateOfBirth: "",
     phone: "",
+    carDeclaration: "",
     signatureName: "",
     signatureDate: "",
   });
@@ -45,6 +59,7 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
           setAlreadySigned(true);
         } else {
           setLeaseDocument(result.document);
+          setSchedule(result.schedule);
         }
       } catch (err) {
         console.error("Failed to load lease info", err);
@@ -55,6 +70,8 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
     };
     fetchDoc();
   }, [tenantId]);
+
+  const passport = formData.identityType === "passport";
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -74,24 +91,17 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
       return;
     }
 
-    // Id validation
-    if (!isValidSAId(formData.idNumber)) {
-      setError("Please enter a valid South African ID number.");
-      return;
-    }
-
-    // Phone validation
-    if (!isValidPhone(formData.phone)) {
-      setError("Please enter a valid South African phone number.");
+    // The same checks the server makes, for quick feedback
+    const signatureBase64 = signatureRef.current?.toDataURL() || "";
+    const problem = findSubmissionError({ ...formData, signatureBase64 }, dateInSouthAfrica(new Date()));
+    if (problem) {
+      setError(problem);
       return;
     }
 
     setSubmitting(true);
     try {
-      // 1. Get the signature as a base64 data URL
-      const signatureBase64 = signatureRef.current?.toDataURL() || "";
-
-      // 2. The server checks everything, saves it and sends the emails
+      // The server checks everything again, saves it and sends the emails
       const res = await fetch(`/api/signing-links/${encodeURIComponent(tenantId)}/sign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -156,7 +166,10 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
               , please note the following before proceeding:
             </p>
             <ul className="text-sm text-gray-600 space-y-2 mb-6 list-disc list-inside">
-              <li>We collect your full name, ID number, phone number, and email address.</li>
+              <li>
+                We collect your full name, South African ID number or passport number with its issuing country, date of
+                birth, phone number, email address, and whether you have a car.
+              </li>
               <li>This information is used solely for processing this lease agreement and maintaining tenant records.</li>
               <li>Your data is stored securely and will not be shared with third parties.</li>
               <li>
@@ -184,6 +197,37 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
           <h1 className="text-4xl font-light tracking-tight mb-2 uppercase">Lease Agreement</h1>
           <p className="text-gray-500 text-sm">Please review the lease terms carefully, fill in your details, and sign below.</p>
         </div>
+
+        {/* Lease Schedule */}
+        {schedule && (
+          <div className="mb-12">
+            <h2 className="text-xl font-medium tracking-wide uppercase mb-6 border-b border-black pb-2">Lease Schedule</h2>
+            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-12 gap-y-4 text-sm">
+              <div className="flex justify-between gap-4 border-b border-gray-200 pb-2">
+                <dt className="text-gray-500">Unit</dt>
+                <dd className="font-medium">{schedule.unitType} {schedule.unitNumber}</dd>
+              </div>
+              <div className="flex justify-between gap-4 border-b border-gray-200 pb-2">
+                <dt className="text-gray-500">Rent</dt>
+                <dd className="font-medium">R{schedule.rent.toLocaleString("en-ZA")} a month</dd>
+              </div>
+              <div className="flex justify-between gap-4 border-b border-gray-200 pb-2">
+                <dt className="text-gray-500">Start date</dt>
+                <dd className="font-medium">{formatDate(schedule.startDate)}</dd>
+              </div>
+              <div className="flex justify-between gap-4 border-b border-gray-200 pb-2">
+                <dt className="text-gray-500">End date</dt>
+                <dd className="font-medium">{formatDate(schedule.endDate)}</dd>
+              </div>
+              <div className="flex justify-between gap-4 border-b border-gray-200 pb-2">
+                <dt className="text-gray-500">Deposit</dt>
+                <dd className="font-medium">
+                  {schedule.deposit === null ? "To be confirmed" : `R${schedule.deposit.toLocaleString("en-ZA")}`}
+                </dd>
+              </div>
+            </dl>
+          </div>
+        )}
 
         {/* Lease Download Section */}
         <div className="mb-12 border border-black p-6 bg-gray-50 flex flex-col sm:flex-row items-center justify-between gap-6">
@@ -239,20 +283,78 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
                 />
               </div>
 
-              <div className="flex items-end gap-2 sm:gap-4">
-                <label htmlFor="idNumber" className="w-24 sm:w-28 text-sm font-medium whitespace-nowrap pb-1">ID Number</label>
-                <input
-                  type="text"
-                  id="idNumber"
-                  name="idNumber"
-                  value={formData.idNumber}
-                  onChange={handleChange}
-                  required
-                  pattern="\d{13}"
-                  title="ID number must be exactly 13 digits"
-                  className="flex-1 border-b-2 border-black focus:outline-none bg-transparent pb-1 px-1 text-lg rounded-none w-full min-w-0"
-                />
-              </div>
+              <fieldset className="md:col-span-2">
+                <legend className="text-sm font-medium mb-3">South African ID or passport?</legend>
+                <div className="flex flex-wrap gap-x-8 gap-y-2">
+                  {[
+                    ["sa_id", "South African ID"],
+                    ["passport", "Passport"],
+                  ].map(([value, label]) => (
+                    <label key={value} className="flex items-center gap-2 text-sm cursor-pointer">
+                      <input
+                        type="radio"
+                        name="identityType"
+                        value={value}
+                        checked={formData.identityType === value}
+                        onChange={handleChange}
+                        required
+                        className="w-4 h-4 accent-black"
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+
+              {formData.identityType && (
+                <div className="flex items-end gap-2 sm:gap-4">
+                  <label htmlFor="idNumber" className="w-24 sm:w-28 text-sm font-medium whitespace-nowrap pb-1">
+                    {passport ? "Passport No." : "ID Number"}
+                  </label>
+                  <input
+                    type="text"
+                    id="idNumber"
+                    name="idNumber"
+                    value={formData.idNumber}
+                    onChange={handleChange}
+                    required
+                    {...(passport ? {} : { pattern: "\\d{13}", title: "ID number must be exactly 13 digits" })}
+                    className={INPUT_CLASS}
+                  />
+                </div>
+              )}
+
+              {passport && (
+                <>
+                  <div className="flex items-end gap-2 sm:gap-4">
+                    <label htmlFor="passportCountry" className="w-24 sm:w-28 text-sm font-medium whitespace-nowrap pb-1">Issued By</label>
+                    <input
+                      type="text"
+                      id="passportCountry"
+                      name="passportCountry"
+                      value={formData.passportCountry}
+                      onChange={handleChange}
+                      required
+                      placeholder="Country"
+                      className={INPUT_CLASS}
+                    />
+                  </div>
+
+                  <div className="flex items-end gap-2 sm:gap-4">
+                    <label htmlFor="dateOfBirth" className="w-24 sm:w-28 text-sm font-medium whitespace-nowrap pb-1">Date of Birth</label>
+                    <input
+                      type="date"
+                      id="dateOfBirth"
+                      name="dateOfBirth"
+                      value={formData.dateOfBirth}
+                      onChange={handleChange}
+                      required
+                      max={dateInSouthAfrica(new Date())}
+                      className={`${INPUT_CLASS} appearance-none`}
+                    />
+                  </div>
+                </>
+              )}
 
               <div className="flex items-end gap-2 sm:gap-4">
                 <label htmlFor="phone" className="w-24 sm:w-28 text-sm font-medium whitespace-nowrap pb-1">Phone</label>
@@ -270,6 +372,34 @@ export default function LeaseSignPage({ params }: { params: Promise<{ tenantId: 
               </div>
             </div>
           </div>
+
+          {/* Car Declaration */}
+          <fieldset>
+            <legend className="w-full text-xl font-medium tracking-wide uppercase mb-6 border-b border-black pb-2">Car Declaration</legend>
+            <div className="flex flex-wrap gap-x-8 gap-y-2">
+              {[
+                ["car", "I have a car"],
+                ["no_car", "I do not have a car"],
+              ].map(([value, label]) => (
+                <label key={value} className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="radio"
+                    name="carDeclaration"
+                    value={value}
+                    checked={formData.carDeclaration === value}
+                    onChange={handleChange}
+                    required
+                    className="w-4 h-4 accent-black"
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+            <p className="text-xs text-gray-500 mt-3">
+              The property has two Parking Bays. Having a car does not by itself give you one; the landlord grants a
+              Parking Reservation only when a bay is free.
+            </p>
+          </fieldset>
 
           {/* Signature Section */}
           <div>
