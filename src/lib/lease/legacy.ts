@@ -44,6 +44,7 @@ export function planMigration(old: LegacyRecord, now: Date, today: string): Migr
     documentVersion: 1, // the only version before Renewals
     newTenant: null,
     renews: null,
+    unitMoves: [],
     carDeclaration: null, // nobody was asked before Renewals
     signature: signed
       ? {

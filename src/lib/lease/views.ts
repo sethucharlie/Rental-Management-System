@@ -21,7 +21,8 @@ export interface TenantView {
 export interface LeaseView {
   id: string;
   unitType: string;
-  unitNumber: string;
+  unitNumber: string; // the flat lived in now, after any Unit Move
+  movedFrom: string | null; // the flat signed for, if a Unit Move changed it
   rent: number;
   startDate: string | null;
   endDate: string | null;

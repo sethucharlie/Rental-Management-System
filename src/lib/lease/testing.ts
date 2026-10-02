@@ -55,6 +55,10 @@ export function createMemoryStore(): MemoryStore {
       leases.set(leaseId, { ...lease, carDeclaration, signature: structuredClone(signature) });
       return "signed";
     },
+    async addUnitMove(leaseId, move) {
+      const lease = leases.get(leaseId);
+      if (lease) leases.set(leaseId, { ...lease, unitMoves: [...lease.unitMoves, structuredClone(move)] });
+    },
     async updateIdentityGuard(leaseId, next) {
       const lease = leases.get(leaseId);
       if (!lease) return;

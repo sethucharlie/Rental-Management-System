@@ -40,12 +40,23 @@ export interface LeaseRecord {
   // at signing. null on a migrated Lease.
   newTenant: NewTenantTerms | null;
   renews: string | null; // on a Renewal, the Lease it renews; null on a first Lease
+  // Flat-to-flat moves during this Lease, oldest first. `unitNumber` stays the flat signed for.
+  unitMoves: UnitMove[];
   carDeclaration: CarDeclaration | null; // null until signed, and on a migrated Lease
   signature: LeaseSignature | null;
   createdAt: Date;
   legacyId?: string;
   identityGuard?: IdentityGuard; // Renewals only; missing means no wrong tries yet
 }
+
+export interface UnitMove {
+  fromUnitNumber: string;
+  toUnitNumber: string;
+  movedOn: string; // YYYY-MM-DD
+}
+
+// The flat the Tenant lives in now: the last Unit Move's, or the one signed for.
+export const currentUnitNumber = (lease: LeaseRecord) => lease.unitMoves.at(-1)?.toUnitNumber ?? lease.unitNumber;
 
 // Counts wrong Identity Numbers entered on a Renewal Signing Link.
 export interface IdentityGuard {

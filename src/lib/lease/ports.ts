@@ -1,7 +1,7 @@
 // The Lease module talks to the outside world only through these ports.
 // Production wires Firestore, Gmail and the system clock; tests wire fakes.
 import { LegacyRecord, MigrationStep } from "./legacy";
-import { CarDeclaration, IdentityGuard, LeaseRecord, LeaseSignature, Stored, TenantRecord } from "./model";
+import { CarDeclaration, IdentityGuard, LeaseRecord, LeaseSignature, Stored, TenantRecord, UnitMove } from "./model";
 
 export type SignResult = "signed" | "already_signed" | "not_found";
 
@@ -24,6 +24,8 @@ export interface LeaseStore {
     tenantChanges: Partial<TenantRecord>,
     signing: { carDeclaration: CarDeclaration; signature: LeaseSignature },
   ): Promise<SignResult>;
+  // Adds a Unit Move to the end of the Lease's list.
+  addUnitMove(leaseId: string, move: UnitMove): Promise<void>;
   // In one atomic step: save what `next` makes of the Lease's identity guard.
   updateIdentityGuard(leaseId: string, next: (guard: IdentityGuard) => IdentityGuard): Promise<void>;
 

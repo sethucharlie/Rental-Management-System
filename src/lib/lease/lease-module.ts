@@ -4,6 +4,7 @@ import { planMigration } from "./legacy";
 import {
   CarDeclaration,
   currentLease,
+  currentUnitNumber,
   dateInSouthAfrica,
   dateOfBirthFromSAId,
   firstLeaseEndDate,
@@ -71,6 +72,12 @@ export interface NewRenewalLink {
 
 // Left out, the Deposit and Parking Reservation stay as they are. A blank Deposit means
 // not recorded.
+// The flat a Tenant moves to. The unit type is asked for so a move into the house can be refused.
+export interface NewUnit {
+  unitType: string;
+  unitNumber: string;
+}
+
 export interface TenantChanges extends TenantDetailsFields {
   state: TenantState;
   depositPaid?: string;
@@ -221,6 +228,7 @@ export function createLeaseModule({ store, mailer, clock, landlordEmail, appUrl,
         documentVersion: document.version,
         newTenant: { depositPaid: Number(input.deposit), parkingReservation: input.parkingReservation === true },
         renews: null,
+        unitMoves: [],
         carDeclaration: null,
         signature: null,
         createdAt: clock.now(),
@@ -261,6 +269,7 @@ export function createLeaseModule({ store, mailer, clock, landlordEmail, appUrl,
         documentVersion: document.version,
         newTenant: null,
         renews: current.id,
+        unitMoves: [],
         carDeclaration: null,
         signature: null,
         createdAt: clock.now(),
@@ -426,6 +435,27 @@ export function createLeaseModule({ store, mailer, clock, landlordEmail, appUrl,
       return { status: "saved" };
     },
 
+    // A Unit Move: flat to flat during a Lease, with no signing and no change in rent. The
+    // Lease keeps the flat signed for and records the move; the next Renewal names the new flat.
+    async moveUnit(tenantId: string, to: NewUnit): Promise<MoveOutcome> {
+      const tenant = await store.getTenant(tenantId);
+      if (!tenant) return { status: "not_found" };
+      if (tenant.state !== "current") return { status: "invalid", error: "Only a Current Tenant can make a Unit Move." };
+
+      const lease = currentLease((await store.listLeases()).filter((l) => l.tenantId === tenantId));
+      if (!lease?.signature) return { status: "invalid", error: "This Tenant has no signed Lease." };
+      if (lease.unitType !== "Flat" || to.unitType !== "Flat") {
+        return { status: "invalid", error: "A move into or out of the house needs a new first Lease, not a Unit Move." };
+      }
+      const unitNumber = to.unitNumber?.trim() ?? "";
+      if (!unitNumber) return { status: "invalid", error: "Please enter the new flat number." };
+      const from = currentUnitNumber(lease);
+      if (unitNumber === from) return { status: "invalid", error: `The Tenant is already in Flat ${from}.` };
+
+      await store.addUnitMove(lease.id, { fromUnitNumber: from, toUnitNumber: unitNumber, movedOn: today() });
+      return { status: "moved" };
+    },
+
     async deleteTenant(id: string): Promise<DeleteOutcome> {
       if (!(await store.getTenant(id))) return { status: "not_found" };
       await store.deleteTenant(id);
@@ -516,10 +546,12 @@ function scheduleView(l: LeaseRecord): LeaseScheduleView {
 }
 
 function leaseView(l: Stored<LeaseRecord>, today: string): LeaseView {
+  const unitNumber = currentUnitNumber(l);
   return {
     id: l.id,
     unitType: l.unitType,
-    unitNumber: l.unitNumber,
+    unitNumber,
+    movedFrom: unitNumber === l.unitNumber ? null : l.unitNumber,
     rent: l.rent,
     startDate: l.startDate,
     endDate: l.endDate,
@@ -544,6 +576,8 @@ export type SignOutcome =
   | { status: "blocked" };
 
 export type UpdateOutcome = { status: "saved" } | { status: "not_found" } | { status: "invalid"; error: string };
+
+export type MoveOutcome = { status: "moved" } | { status: "not_found" } | { status: "invalid"; error: string };
 
 export type DeleteOutcome = { status: "deleted" } | { status: "not_found" } | { status: "signed" };
 
