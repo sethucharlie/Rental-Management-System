@@ -33,10 +33,14 @@ export interface LeaseView {
 
 // One row per Tenant with their current Lease, plus one per first Lease nobody has signed yet.
 // `renewal` is the Tenant's Renewal Signing Link while it waits for their signature.
+// The two flags are only ever set for a Current Tenant.
 export interface DashboardRow {
   tenant: TenantView | null;
   lease: LeaseView | null;
   renewal: LeaseView | null;
+  renewalSentNotSigned: boolean;
+  monthToMonth: boolean; // their latest signed Lease has Ended
+  history: LeaseView[]; // all their Leases, newest first
 }
 
 export interface SignatureView {

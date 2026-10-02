@@ -139,6 +139,13 @@ export function currentLease<T extends LeaseRecord>(leases: T[]): T | null {
   return signed.reduce((last, l) => ((l.endDate ?? "") > (last.endDate ?? "") ? l : last));
 }
 
+// A Tenant's Leases, the one that ends last first.
+export function leaseHistory<T extends LeaseRecord>(leases: T[]): T[] {
+  return [...leases].sort(
+    (a, b) => (b.endDate ?? "").localeCompare(a.endDate ?? "") || b.createdAt.getTime() - a.createdAt.getTime(),
+  );
+}
+
 // The Renewal waiting for this Tenant's signature, if any.
 export function openRenewal<T extends LeaseRecord>(leases: T[]): T | null {
   return newest(leases.filter((l) => l.renews && !l.signature));

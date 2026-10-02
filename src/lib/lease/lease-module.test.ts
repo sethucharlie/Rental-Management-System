@@ -138,7 +138,7 @@ describe("Tenants and Leases", () => {
     const { id } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500", ...firstLeaseTerms });
 
     expect(await lease.listDashboard()).toEqual([
-      { tenant: null, lease: expect.objectContaining({ id, unitNumber: "5", rent: 1500, state: "awaiting_signature" }), renewal: null },
+      expect.objectContaining({ tenant: null, lease: expect.objectContaining({ id, unitNumber: "5", rent: 1500, state: "awaiting_signature" }), renewal: null }),
     ]);
   });
 
@@ -224,7 +224,7 @@ describe("Tenants and Leases", () => {
 
       expect(report).toMatchObject({ migrated: 1, skipped: 0 });
       expect(await lease.listDashboard()).toEqual([
-        {
+        expect.objectContaining({
           tenant: expect.objectContaining({
             id: "old-1",
             name: "Sipho Dlamini",
@@ -236,7 +236,7 @@ describe("Tenants and Leases", () => {
           }),
           lease: expect.objectContaining({ id: "old-1", unitType: "Flat", unitNumber: "3", rent: 1500, endDate: "2026-12-31", state: "signed" }),
           renewal: null,
-        },
+        }),
       ]);
       expect(await lease.getSignature("old-1")).toEqual({
         image: "data:image/png;base64,BBBB",
@@ -278,7 +278,7 @@ describe("Tenants and Leases", () => {
       await lease.migrate({ dryRun: false });
 
       expect(await lease.listDashboard()).toEqual([
-        { tenant: null, lease: expect.objectContaining({ id: "old-2", unitType: "House", rent: 3000, state: "awaiting_signature" }), renewal: null },
+        expect.objectContaining({ tenant: null, lease: expect.objectContaining({ id: "old-2", unitType: "House", rent: 3000, state: "awaiting_signature" }), renewal: null }),
       ]);
       expect(await lease.openSigningLink("old-2")).toMatchObject({ status: "open" });
       expect(await lease.signLease("old-2", validSubmission)).toEqual({ status: "signed" });
@@ -760,6 +760,95 @@ describe("Deposit and Parking Reservations on the dashboard", () => {
       holders: [expect.objectContaining({ name: "Thandi Mokoena" })],
       promisedToUnsignedLinks: 1,
     });
+  });
+});
+
+describe("Renewal flags and Lease history", () => {
+  let lease: LeaseModule;
+  let store: MemoryStore;
+  let clock: ReturnType<typeof settableClock>;
+  let tenantId: string;
+  let firstLeaseId: string;
+
+  const row = async () => (await lease.listDashboard()).find((r) => r.tenant?.id === tenantId)!;
+  const renewal = () => lease.createRenewalLink(tenantId, { unitType: "Flat", unitNumber: "5", rent: "1650" });
+  const signRenewal = (id: string) => lease.signLease(id, { ...validSubmission, carDeclaration: "car" });
+
+  beforeEach(async () => {
+    store = createMemoryStore();
+    clock = settableClock(new Date("2026-10-05T09:00:00Z"));
+    lease = createLeaseModule({
+      store,
+      mailer: createFakeMailer(),
+      clock,
+      landlordEmail: "landlord@example.com",
+      appUrl: "https://lease.example.com",
+      documentVersions: [versionOne],
+    });
+    ({ id: firstLeaseId } = await lease.createSigningLink({ unitType: "Flat", unitNumber: "5", rent: "1500", ...firstLeaseTerms }));
+    await lease.signLease(firstLeaseId, validSubmission);
+    tenantId = (await store.listTenants())[0].id;
+  });
+
+  it("shows no flag while the Lease runs and no Renewal is out", async () => {
+    expect(await row()).toMatchObject({ renewalSentNotSigned: false, monthToMonth: false });
+  });
+
+  it("flags a Renewal sent and not signed, before 31 December", async () => {
+    await renewal();
+
+    expect(await row()).toMatchObject({ renewalSentNotSigned: true, monthToMonth: false });
+  });
+
+  it("flags Month to Month after 31 December with no Renewal", async () => {
+    clock.set(new Date("2027-01-01T09:00:00Z"));
+
+    expect(await row()).toMatchObject({ renewalSentNotSigned: false, monthToMonth: true });
+  });
+
+  it("shows both flags after 31 December while the Renewal waits", async () => {
+    await renewal();
+    clock.set(new Date("2027-01-10T09:00:00Z"));
+
+    expect(await row()).toMatchObject({ renewalSentNotSigned: true, monthToMonth: true });
+  });
+
+  it("clears both flags once the Renewal is signed, before or after 31 December", async () => {
+    const { id } = await renewal();
+    await signRenewal(id);
+    expect(await row()).toMatchObject({ renewalSentNotSigned: false, monthToMonth: false });
+
+    clock.set(new Date("2027-01-10T09:00:00Z"));
+    expect(await row()).toMatchObject({ renewalSentNotSigned: false, monthToMonth: false });
+  });
+
+  it("never flags a Moved Out Tenant", async () => {
+    await renewal();
+    await lease.updateTenant(tenantId, { ...tenantDetails, state: "moved_out" });
+    clock.set(new Date("2027-01-10T09:00:00Z"));
+
+    expect(await row()).toMatchObject({ renewalSentNotSigned: false, monthToMonth: false });
+  });
+
+  it("never flags an unsigned first-Lease row", async () => {
+    await lease.createSigningLink({ unitType: "Flat", unitNumber: "8", rent: "1500", ...firstLeaseTerms });
+    clock.set(new Date("2027-01-10T09:00:00Z"));
+    const unsigned = (await lease.listDashboard()).find((r) => !r.tenant)!;
+
+    expect(unsigned).toMatchObject({ renewalSentNotSigned: false, monthToMonth: false, history: [] });
+  });
+
+  it("lists each Tenant's Leases over the years, newest first", async () => {
+    const first = await renewal();
+    await signRenewal(first.id);
+    clock.set(new Date("2027-10-05T09:00:00Z"));
+    const second = await renewal();
+
+    expect((await row()).history).toEqual([
+      expect.objectContaining({ id: second.id, startDate: "2028-01-01", state: "awaiting_signature" }),
+      expect.objectContaining({ id: first.id, startDate: "2027-01-01", state: "signed" }),
+      expect.objectContaining({ id: firstLeaseId, endDate: "2026-12-31", state: "ended" }),
+    ]);
   });
 });
 
