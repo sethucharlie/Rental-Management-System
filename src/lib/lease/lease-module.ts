@@ -12,6 +12,7 @@ import {
   isInRenewalWindow,
   isRealDate,
   latestDocumentVersion,
+  leaseHistory,
   LeaseDocumentVersion,
   LeaseRecord,
   leaseState,
@@ -363,13 +364,30 @@ export function createLeaseModule({ store, mailer, clock, landlordEmail, appUrl,
       const leasesOf = (tenantId: string) => leases.filter((l) => l.tenantId === tenantId);
 
       const tenantRows = tenants.map((t) => {
-        const lease = currentLease(leasesOf(t.id));
-        const renewal = openRenewal(leasesOf(t.id));
-        return { tenant: tenantView(t), lease: lease && leaseView(lease, now), renewal: renewal && leaseView(renewal, now) };
+        const theirs = leasesOf(t.id);
+        const lease = currentLease(theirs);
+        const renewal = openRenewal(theirs);
+        const current = t.state === "current";
+        return {
+          tenant: tenantView(t),
+          lease: lease && leaseView(lease, now),
+          renewal: renewal && leaseView(renewal, now),
+          renewalSentNotSigned: current && renewal !== null,
+          // currentLease is the signed Lease that ends last, so a signed Renewal clears this.
+          monthToMonth: current && lease !== null && leaseState(lease, now) === "ended",
+          history: leaseHistory(theirs).map((l) => leaseView(l, now)),
+        };
       });
       const unsignedRows = leases
         .filter((l) => l.tenantId === null)
-        .map((l) => ({ tenant: null, lease: leaseView(l, now), renewal: null }));
+        .map((l) => ({
+          tenant: null,
+          lease: leaseView(l, now),
+          renewal: null,
+          renewalSentNotSigned: false,
+          monthToMonth: false,
+          history: [],
+        }));
       return [...tenantRows, ...unsignedRows];
     },
 

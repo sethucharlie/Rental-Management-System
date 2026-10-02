@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from 'react';
+import { Fragment, useEffect, useState, useMemo } from 'react';
 import { errorMessage, landlordFetch } from '@/lib/landlord-api';
 import type { LeaseState, TenantState } from '@/lib/lease/model';
 import type { DashboardRow, ParkingView, SignatureView, TenantView } from '@/lib/lease/views';
@@ -9,7 +9,7 @@ import ConfirmDeleteModal from '@/components/ConfirmDeleteModal';
 import SignatureViewModal from '@/components/SignatureViewModal';
 import RenewalLinkModal from '@/components/RenewalLinkModal';
 import UnitMoveModal from '@/components/UnitMoveModal';
-import { Search, Filter, Edit2, Trash2, ArrowUpDown, PenLine, Copy, Check, RefreshCw, CalendarPlus, ArrowRightLeft } from 'lucide-react';
+import { Search, Filter, Edit2, Trash2, ArrowUpDown, PenLine, Copy, Check, RefreshCw, CalendarPlus, ArrowRightLeft, History } from 'lucide-react';
 
 type SortField = 'name' | 'createdAt';
 type SortOrder = 'asc' | 'desc';
@@ -37,6 +37,7 @@ export default function TenantsPage() {
   const [tenantStateFilter, setTenantStateFilter] = useState('all');
   const [leaseStateFilter, setLeaseStateFilter] = useState('all');
   const [unitFilter, setUnitFilter] = useState('all');
+  const [flagFilter, setFlagFilter] = useState('all');
 
   // Sorting
   const [sortField, setSortField] = useState<SortField>('createdAt');
@@ -49,6 +50,8 @@ export default function TenantsPage() {
   const [copiedLinkId, setCopiedLinkId] = useState('');
   const [renewing, setRenewing] = useState<DashboardRow | null>(null);
   const [moving, setMoving] = useState<DashboardRow | null>(null);
+  // The Tenant whose Lease history is open, if any.
+  const [historyTenantId, setHistoryTenantId] = useState('');
 
   // Bumping this reloads the list.
   const [reloads, setReloads] = useState(0);
@@ -127,6 +130,12 @@ export default function TenantsPage() {
       result = result.filter(r => r.lease?.state === leaseStateFilter);
     }
 
+    if (flagFilter === 'renewal_sent') {
+      result = result.filter(r => r.renewalSentNotSigned);
+    } else if (flagFilter === 'month_to_month') {
+      result = result.filter(r => r.monthToMonth);
+    }
+
     if (unitFilter !== 'all') {
       result = result.filter(r => r.lease?.unitType === unitFilter || r.lease?.unitNumber === unitFilter);
     }
@@ -141,7 +150,7 @@ export default function TenantsPage() {
     });
 
     return result;
-  }, [rows, searchQuery, tenantStateFilter, leaseStateFilter, unitFilter, sortField, sortOrder]);
+  }, [rows, searchQuery, tenantStateFilter, leaseStateFilter, flagFilter, unitFilter, sortField, sortOrder]);
 
   const uniqueUnits = useMemo(() => {
     const units = new Set<string>();
@@ -244,6 +253,16 @@ export default function TenantsPage() {
               <option key={u} value={u}>{u}</option>
             ))}
           </select>
+
+          <select
+            value={flagFilter}
+            onChange={(e) => setFlagFilter(e.target.value)}
+            className="text-sm border-b border-black bg-transparent focus:outline-none pb-1 cursor-pointer"
+          >
+            <option value="all">All Flags</option>
+            <option value="renewal_sent">Renewal sent, not signed</option>
+            <option value="month_to_month">Month to Month</option>
+          </select>
         </div>
 
         {parking && (
@@ -296,8 +315,10 @@ export default function TenantsPage() {
                 filteredAndSortedRows.map((row) => {
                   const { tenant, lease } = row;
                   const hasSignature = lease?.state === 'signed' || lease?.state === 'ended';
+                  const showHistory = tenant !== null && historyTenantId === tenant.id;
                   return (
-                  <tr key={rowKey(row)} className="border-b border-gray-200 hover:bg-gray-50 transition-colors group">
+                  <Fragment key={rowKey(row)}>
+                  <tr className="border-b border-gray-200 hover:bg-gray-50 transition-colors group">
                     <td className="p-4">
                       {tenant ? (
                         <>
@@ -335,6 +356,12 @@ export default function TenantsPage() {
                     <td className="p-4 text-sm">
                       {getLeaseStateBadge(lease?.state)}
                       {lease?.endDate && <div className="text-xs text-gray-500 mt-2">Ends {formatDate(lease.endDate)}</div>}
+                      {row.renewalSentNotSigned && (
+                        <div className="mt-2"><span className="px-2 py-1 bg-blue-50 text-blue-800 text-xs font-bold border border-blue-200">Renewal sent, not signed</span></div>
+                      )}
+                      {row.monthToMonth && (
+                        <div className="mt-2"><span className="px-2 py-1 bg-amber-50 text-amber-800 text-xs font-bold border border-amber-200">Month to Month</span></div>
+                      )}
                     </td>
                     <td className="p-4 text-right">
                       <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -365,6 +392,15 @@ export default function TenantsPage() {
                             <ArrowRightLeft size={16} />
                           </button>
                         )}
+                        {tenant && (
+                          <button
+                            onClick={() => setHistoryTenantId(showHistory ? '' : tenant.id)}
+                            className={`p-2 border transition-colors hover:border-black hover:bg-black hover:text-white ${showHistory ? 'border-black' : 'border-gray-200'}`}
+                            title={showHistory ? 'Hide Lease history' : 'Show Lease history'}
+                          >
+                            <History size={16} />
+                          </button>
+                        )}
                         {hasSignature && (
                           <button
                             onClick={() => handleViewSignature(row)}
@@ -393,6 +429,31 @@ export default function TenantsPage() {
                       </div>
                     </td>
                   </tr>
+                  {showHistory && (
+                    <tr className="border-b border-gray-200 bg-gray-50">
+                      <td colSpan={7} className="px-4 pb-4">
+                        <div className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-2">Lease history</div>
+                        <table className="w-full text-sm">
+                          <tbody>
+                            {row.history.map((h) => (
+                              <tr key={h.id} className="border-t border-gray-200">
+                                <td className="py-2 pr-4">
+                                  {h.startDate ? formatDate(h.startDate) : 'Start not recorded'} to {h.endDate ? formatDate(h.endDate) : '—'}
+                                </td>
+                                <td className="py-2 pr-4">
+                                  {h.unitType} {h.unitNumber}
+                                  {h.movedFrom && <span className="text-gray-500"> (signed for {h.movedFrom})</span>}
+                                </td>
+                                <td className="py-2 pr-4">R{h.rent}</td>
+                                <td className="py-2">{LEASE_STATE_LABEL[h.state]}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                   );
                 })
               )}
