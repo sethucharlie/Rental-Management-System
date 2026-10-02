@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { errorMessage, landlordFetch } from '@/lib/landlord-api';
 import type { LeaseState, TenantState } from '@/lib/lease/model';
-import type { DashboardRow, SignatureView, TenantView } from '@/lib/lease/views';
+import type { DashboardRow, ParkingView, SignatureView, TenantView } from '@/lib/lease/views';
 import EditTenantModal, { TenantChanges } from '@/components/EditTenantModal';
 import ConfirmDeleteModal from '@/components/ConfirmDeleteModal';
 import SignatureViewModal from '@/components/SignatureViewModal';
@@ -27,6 +27,7 @@ const formatDate = (date: string) =>
 
 export default function TenantsPage() {
   const [rows, setRows] = useState<DashboardRow[]>([]);
+  const [parking, setParking] = useState<ParkingView | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
 
@@ -53,11 +54,12 @@ export default function TenantsPage() {
 
   useEffect(() => {
     let cancelled = false;
-    landlordFetch<{ rows: DashboardRow[] }>('/api/tenants')
+    landlordFetch<{ rows: DashboardRow[]; parking: ParkingView }>('/api/tenants')
       .then(
-        ({ rows }) => {
+        ({ rows, parking }) => {
           if (cancelled) return;
           setRows(rows);
+          setParking(parking);
           setLoadError('');
         },
         (err) => !cancelled && setLoadError(errorMessage(err, 'Failed to load Tenants')),
@@ -242,6 +244,21 @@ export default function TenantsPage() {
           </select>
         </div>
 
+        {parking && (
+          <div className="mb-8 p-4 border border-gray-200 text-sm">
+            <span className="font-medium">
+              {parking.holders.length + parking.promisedToUnsignedLinks} of {parking.bays} Parking Bays reserved
+            </span>
+            {parking.holders.length > 0 && <span className="text-gray-600">: {parking.holders.map((h) => h.name).join(', ')}</span>}
+            {parking.promisedToUnsignedLinks > 0 && (
+              <span className="text-gray-600">
+                {parking.holders.length > 0 ? ', and ' : ': '}
+                {parking.promisedToUnsignedLinks} promised to {parking.promisedToUnsignedLinks === 1 ? 'an unsigned Signing Link' : 'unsigned Signing Links'}
+              </span>
+            )}
+          </div>
+        )}
+
         {loadError && (
           <div className="bg-red-50 text-red-600 p-4 border border-red-200 text-sm mb-8">{loadError}</div>
         )}
@@ -294,6 +311,9 @@ export default function TenantsPage() {
                             <div className="text-xs text-gray-500 mt-1">
                               {lease.carDeclaration === 'car' ? 'Has a car' : 'No car'}
                             </div>
+                          )}
+                          {tenant.state === 'current' && tenant.parkingReservation && (
+                            <div className="text-xs text-gray-500 mt-1">Parking Reservation</div>
                           )}
                           {tenant.needsDepositAndParking && (
                             <div className="text-xs text-amber-700 mt-1">Deposit and parking not recorded</div>
