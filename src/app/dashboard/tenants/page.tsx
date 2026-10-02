@@ -8,7 +8,8 @@ import EditTenantModal, { TenantChanges } from '@/components/EditTenantModal';
 import ConfirmDeleteModal from '@/components/ConfirmDeleteModal';
 import SignatureViewModal from '@/components/SignatureViewModal';
 import RenewalLinkModal from '@/components/RenewalLinkModal';
-import { Search, Filter, Edit2, Trash2, ArrowUpDown, PenLine, Copy, Check, RefreshCw, CalendarPlus } from 'lucide-react';
+import UnitMoveModal from '@/components/UnitMoveModal';
+import { Search, Filter, Edit2, Trash2, ArrowUpDown, PenLine, Copy, Check, RefreshCw, CalendarPlus, ArrowRightLeft } from 'lucide-react';
 
 type SortField = 'name' | 'createdAt';
 type SortOrder = 'asc' | 'desc';
@@ -47,6 +48,7 @@ export default function TenantsPage() {
   const [signature, setSignature] = useState<{ tenantName: string; view: SignatureView } | null>(null);
   const [copiedLinkId, setCopiedLinkId] = useState('');
   const [renewing, setRenewing] = useState<DashboardRow | null>(null);
+  const [moving, setMoving] = useState<DashboardRow | null>(null);
 
   // Bumping this reloads the list.
   const [reloads, setReloads] = useState(0);
@@ -326,6 +328,7 @@ export default function TenantsPage() {
                     <td className="p-4 text-sm">{tenant?.phone}</td>
                     <td className="p-4 text-sm">
                       {[lease?.unitType, lease?.unitNumber].filter(Boolean).join(' - ') || '—'}
+                      {lease?.movedFrom && <div className="text-xs text-gray-500 mt-1">Moved from {lease.movedFrom}</div>}
                     </td>
                     <td className="p-4 text-sm font-medium">{lease?.rent ? `R${lease.rent}` : '—'}</td>
                     <td className="p-4 text-sm">{getTenantStateBadge(tenant)}</td>
@@ -351,6 +354,15 @@ export default function TenantsPage() {
                             title={row.renewal ? 'Renewal Signing Link (not signed yet)' : 'Create Signing Link for a Renewal'}
                           >
                             <CalendarPlus size={16} />
+                          </button>
+                        )}
+                        {tenant?.state === 'current' && hasSignature && (
+                          <button
+                            onClick={() => setMoving(row)}
+                            className="p-2 border border-gray-200 hover:border-black hover:bg-black hover:text-white transition-colors"
+                            title="Unit Move"
+                          >
+                            <ArrowRightLeft size={16} />
                           </button>
                         )}
                         {hasSignature && (
@@ -401,6 +413,13 @@ export default function TenantsPage() {
         row={renewing}
         onClose={() => setRenewing(null)}
         onChanged={reload}
+      />
+
+      <UnitMoveModal
+        key={moving ? `move-${rowKey(moving)}` : undefined}
+        row={moving}
+        onClose={() => setMoving(null)}
+        onMoved={reload}
       />
 
       <ConfirmDeleteModal

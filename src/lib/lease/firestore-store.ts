@@ -66,6 +66,17 @@ export function createFirestoreStore(db: Firestore): LeaseStore {
       });
     },
 
+    // Not arrayUnion: it would drop a move identical to an earlier one, such as 5 to 7 again.
+    async addUnitMove(leaseId, move) {
+      const leaseRef = leases.doc(leaseId);
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(leaseRef);
+        if (!snap.exists) return;
+        const moves = Array.isArray(snap.data()!.unitMoves) ? snap.data()!.unitMoves : [];
+        tx.update(leaseRef, { unitMoves: [...moves, { ...move }], updatedAt: FieldValue.serverTimestamp() });
+      });
+    },
+
     async updateIdentityGuard(leaseId, next) {
       const leaseRef = leases.doc(leaseId);
       await db.runTransaction(async (tx) => {
@@ -163,6 +174,13 @@ function leaseFromDoc(id: string, d: DocumentData): Stored<LeaseRecord> {
       ? { depositPaid: Number(d.newTenant.depositPaid) || 0, parkingReservation: d.newTenant.parkingReservation === true }
       : null,
     renews: d.renews ?? null,
+    unitMoves: Array.isArray(d.unitMoves)
+      ? d.unitMoves.map((m: DocumentData) => ({
+          fromUnitNumber: m.fromUnitNumber ?? "",
+          toUnitNumber: m.toUnitNumber ?? "",
+          movedOn: m.movedOn ?? "",
+        }))
+      : [],
     carDeclaration: d.carDeclaration === "car" || d.carDeclaration === "no_car" ? d.carDeclaration : null,
     signature: d.signature
       ? {

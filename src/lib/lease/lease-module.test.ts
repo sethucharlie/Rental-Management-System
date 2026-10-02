@@ -763,6 +763,115 @@ describe("Deposit and Parking Reservations on the dashboard", () => {
   });
 });
 
+describe("Unit Move", () => {
+  let lease: LeaseModule;
+  let store: MemoryStore;
+  let clock: ReturnType<typeof settableClock>;
+
+  // A Current Tenant who signed a first Lease for the given unit.
+  const signTenant = async (unitType = "Flat", unitNumber = "5", rent = "1500") => {
+    const { id } = await lease.createSigningLink({ unitType, unitNumber, rent, ...firstLeaseTerms });
+    await lease.signLease(id, validSubmission);
+    return { leaseId: id, tenantId: (await store.listTenants())[0].id };
+  };
+  const row = async () => (await lease.listDashboard())[0];
+
+  beforeEach(() => {
+    store = createMemoryStore();
+    clock = settableClock(new Date("2026-10-05T09:00:00Z"));
+    lease = createLeaseModule({
+      store,
+      mailer: createFakeMailer(),
+      clock,
+      landlordEmail: "landlord@example.com",
+      appUrl: "https://lease.example.com",
+      documentVersions: [versionOne],
+    });
+  });
+
+  it("moves a Tenant from flat to flat and leaves the rent unchanged", async () => {
+    const { leaseId, tenantId } = await signTenant();
+
+    expect(await lease.moveUnit(tenantId, { unitType: "Flat", unitNumber: " 7 " })).toEqual({ status: "moved" });
+    expect((await row()).lease).toMatchObject({ id: leaseId, unitType: "Flat", unitNumber: "7", movedFrom: "5", rent: 1500 });
+  });
+
+  it("keeps the flat the Tenant signed for on the Lease itself", async () => {
+    const { leaseId, tenantId } = await signTenant();
+
+    await lease.moveUnit(tenantId, { unitType: "Flat", unitNumber: "7" });
+    expect(await store.getLease(leaseId)).toMatchObject({
+      unitNumber: "5",
+      unitMoves: [{ fromUnitNumber: "5", toUnitNumber: "7", movedOn: "2026-10-05" }],
+    });
+  });
+
+  it("shows the newest flat after two moves", async () => {
+    const { tenantId } = await signTenant();
+    await lease.moveUnit(tenantId, { unitType: "Flat", unitNumber: "7" });
+    clock.set(new Date("2026-11-02T09:00:00Z"));
+    await lease.moveUnit(tenantId, { unitType: "Flat", unitNumber: "2" });
+
+    expect((await row()).lease).toMatchObject({ unitNumber: "2", movedFrom: "5" });
+  });
+
+  it("refuses a move from a flat into the house", async () => {
+    const { tenantId } = await signTenant();
+
+    expect(await lease.moveUnit(tenantId, { unitType: "House", unitNumber: "1" })).toEqual({
+      status: "invalid",
+      error: "A move into or out of the house needs a new first Lease, not a Unit Move.",
+    });
+    expect((await row()).lease).toMatchObject({ unitType: "Flat", unitNumber: "5", movedFrom: null });
+  });
+
+  it("refuses a move from the house into a flat", async () => {
+    const { tenantId } = await signTenant("House", "1", "3000");
+
+    expect(await lease.moveUnit(tenantId, { unitType: "Flat", unitNumber: "5" })).toEqual({
+      status: "invalid",
+      error: "A move into or out of the house needs a new first Lease, not a Unit Move.",
+    });
+  });
+
+  it.each([
+    ["a blank flat number", { unitNumber: " " }, "Please enter the new flat number."],
+    ["the flat they are in now", { unitNumber: "5" }, "The Tenant is already in Flat 5."],
+  ])("refuses %s", async (_, change, error) => {
+    const { tenantId } = await signTenant();
+
+    expect(await lease.moveUnit(tenantId, { unitType: "Flat", ...change })).toEqual({
+      status: "invalid",
+      error,
+    });
+  });
+
+  it("refuses to move a Moved Out Tenant, or one who does not exist", async () => {
+    const { tenantId } = await signTenant();
+    await store.updateTenant(tenantId, { state: "moved_out" });
+
+    expect(await lease.moveUnit(tenantId, { unitType: "Flat", unitNumber: "7" })).toEqual({
+      status: "invalid",
+      error: "Only a Current Tenant can make a Unit Move.",
+    });
+    expect(await lease.moveUnit("no-such-tenant", { unitType: "Flat", unitNumber: "7" })).toEqual({ status: "not_found" });
+  });
+
+  it("offers the new flat to the next Renewal", async () => {
+    const { tenantId } = await signTenant();
+    await lease.moveUnit(tenantId, { unitType: "Flat", unitNumber: "7" });
+    const { lease: current } = await row();
+
+    // The dashboard pre-fills the Renewal form from the current Lease's unit.
+    const { id } = await lease.createRenewalLink(tenantId, {
+      unitType: current!.unitType,
+      unitNumber: current!.unitNumber,
+      rent: String(current!.rent),
+    });
+    expect(await store.getLease(id)).toMatchObject({ unitNumber: "7", unitMoves: [] });
+  });
+});
+
 describe("Renewal", () => {
   let lease: LeaseModule;
   let store: MemoryStore;
